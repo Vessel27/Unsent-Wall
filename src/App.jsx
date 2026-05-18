@@ -643,6 +643,26 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef, zoom }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+function WelcomeModal({ onClose, col, bg }) {
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(6px)" }}
+    >
+      <div style={{ width:"min(620px,92vw)",background:"linear-gradient(180deg,#0f1220,#141621)",color:"#fff",borderRadius:14,padding:20,boxShadow:"0 30px 80px rgba(0,0,0,0.6)",position:"relative" }}>
+        <button onClick={onClose} style={{ position:"absolute",top:12,right:12,background:"rgba(255,255,255,0.06)",border:"none",width:34,height:34,borderRadius:99,cursor:"pointer",color:"#fff",fontSize:16 }}>×</button>
+        <h2 style={{ margin:0,fontSize:18,fontWeight:800,fontFamily:"Georgia,serif",color: (col?.text) || (bg?.config?.accent) || "#fff",textShadow:"0 2px 8px rgba(0,0,0,0.6)" }}>Unsent Wall</h2>
+        <p style={{ margin:"8px 0 0",fontSize:13.5,color:"rgba(255,255,255,0.95)",lineHeight:1.5,fontFamily:"sans-serif" }}>
+          Unsent Wall is an open anonymous messaging wall — it's a wall full of sticky notes from people who want to write on the wall. Notes are public and no account is required to post.
+        </p>
+        <div style={{ marginTop:14,display:"flex",justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"8px 12px",borderRadius:10,border:"none",background:"#1DB954",color:"#021",fontWeight:700,cursor:"pointer" }}>got it</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function UnsentWall() {
   const bp     = useBreakpoint();
   const mobile = bp === "mobile" || bp === "mobileLg";
@@ -838,7 +858,7 @@ export default function UnsentWall() {
 
   function NoteList({ notes, loading, onNoteClick }) {
     return (
-      <div style={{ height:"100%",overflowY:"auto",overflowX:"hidden",padding:"18px 18px 24px",display:"flex",flexDirection:"column",gap:12,WebkitOverflowScrolling:"touch" }}>
+      <div style={{ minHeight:0,maxHeight:"100%",height:"100%",overflowY:"auto",overflowX:"hidden",padding:"18px 18px 24px",display:"flex",flexDirection:"column",gap:12,WebkitOverflowScrolling:"touch" }}>
         {loading ? (
           <Spinner />
         ) : notes.length === 0 ? (
@@ -847,11 +867,11 @@ export default function UnsentWall() {
           const c = STICKY_COLORS[n.colorIdx];
           return (
             <div key={n.id} onClick={() => onNoteClick(n)}
-              style={{ animation:`fadeUp 0.3s ease ${Math.min(i,8)*0.04}s both`,background:c.bg,borderRadius:13,padding:"15px 15px 13px",position:"relative",overflow:"hidden",boxShadow:"0 3px 14px rgba(0,0,0,0.22),1px 1px 0 rgba(255,255,255,0.5) inset",cursor:"pointer",userSelect:"none",WebkitUserSelect:"none" }}
+              style={{ animation:`fadeUp 0.3s ease ${Math.min(i,8)*0.04}s both`,background:c.bg,borderRadius:13,padding:"18px 18px 16px",minHeight:92,position:"relative",overflow:"hidden",boxShadow:"0 3px 14px rgba(0,0,0,0.22),1px 1px 0 rgba(255,255,255,0.5) inset",cursor:"pointer",userSelect:"none",WebkitUserSelect:"none" }}
             >
               <div style={{ position:"absolute",inset:0,backgroundImage:`repeating-linear-gradient(transparent,transparent 23px,${c.lines} 23px,${c.lines} 24px)`,backgroundPosition:"0 32px",opacity:0.4,pointerEvents:"none" }} />
               <div style={{ position:"absolute",top:-5,left:"50%",transform:"translateX(-50%)",width:40,height:13,background:"rgba(255,255,255,0.55)",borderRadius:2 }} />
-              <p style={{ margin:0,fontSize:13,lineHeight:1.7,color:c.text,fontFamily:"Georgia,serif",wordBreak:"break-word",paddingTop:7,position:"relative" }}>
+              <p style={{ margin:0,fontSize:14,lineHeight:1.85,color:c.text,fontFamily:"Georgia,serif",whiteSpace:"pre-wrap",wordBreak:"break-word",overflowWrap:"break-word",paddingTop:7,position:"relative" }}>
                 {n.text.length > 140 ? n.text.slice(0,137) + "…" : n.text}
               </p>
               {n.spotifyUrl && (
@@ -879,7 +899,7 @@ export default function UnsentWall() {
           <header style={{ flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 13px",background:"rgba(0,0,0,0.45)",backdropFilter:"blur(14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",zIndex:10 }}>
             <div style={{ display:"flex",alignItems:"center",gap:8 }}>
               <div>
-                <h1 style={{ margin:0,fontSize:16,fontWeight:700,color:"#fff",letterSpacing:"-0.3px",lineHeight:1,fontFamily:"Georgia,serif" }}>unsent wall</h1>
+                <h1 style={{ margin:0,fontSize:18,fontWeight:800,color:"#fff",letterSpacing:"-0.3px",lineHeight:1,fontFamily:"Georgia,serif",textShadow:"0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
                 <p style={{ margin:"1px 0 0",fontSize:9,color:"rgba(255,255,255,0.32)",letterSpacing:"1.3px",textTransform:"uppercase",fontFamily:"sans-serif" }}>anonymous · open</p>
               </div>
               <SaveDot status={saveStatus} />
@@ -905,7 +925,7 @@ export default function UnsentWall() {
             ))}
           </div>
 
-          <div style={{ flex:1,overflow:"hidden",position:"relative" }}>
+          <div style={{ flex:1,minHeight:0,overflow:"hidden",position:"relative" }}>
             {mobileTab === "wall" && (
               <div style={{ height:"100%",overflow:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain" }}>
                 <WallCanvas />
@@ -928,7 +948,7 @@ export default function UnsentWall() {
         </div>
 
         {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
-        {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
+        {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} col={col} bg={bg} />}
 
         {/* Compose sheet — MOBILE */}
         {composing && (
@@ -1004,7 +1024,7 @@ export default function UnsentWall() {
         <header style={{ flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between",padding:tablet?"8px 18px":"9px 24px",background:"rgba(0,0,0,0.42)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.07)",zIndex:10 }}>
           <div style={{ display:"flex",alignItems:"center",gap:12 }}>
             <div>
-              <h1 style={{ margin:0,fontSize:tablet?18:20,fontWeight:700,color:"#fff",letterSpacing:"-0.4px",lineHeight:1,fontFamily:"Georgia,serif" }}>unsent wall</h1>
+              <h1 style={{ margin:0,fontSize:tablet?18:20,fontWeight:800,color:"#fff",letterSpacing:"-0.4px",lineHeight:1,fontFamily:"Georgia,serif",textShadow:"0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
               <p style={{ margin:"1px 0 0",fontSize:9.5,color:"rgba(255,255,255,0.32)",letterSpacing:"1.8px",textTransform:"uppercase",fontFamily:"sans-serif" }}>anonymous · public · open</p>
             </div>
             <SaveDot status={saveStatus} />
@@ -1022,7 +1042,7 @@ export default function UnsentWall() {
           </div>
         </header>
 
-        <div style={{ flex:1,overflow:"hidden",display:"flex",flexDirection:"column" }}>
+        <div style={{ flex:1,minHeight:0,overflow:"hidden",display:"flex",flexDirection:"column" }}>
           <div style={{ flexShrink:0,display:"flex",background:"rgba(0,0,0,0.25)",borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
             {[["wall","🗺 wall"],["list","📋 list"]].map(([t,label]) => (
               <button key={t} onClick={() => setDesktopTab(t)}
@@ -1059,7 +1079,7 @@ export default function UnsentWall() {
       </div>
 
       {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
-      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} col={col} bg={bg} />}
 
       {/* Compose modal — DESKTOP */}
       {composing && (
