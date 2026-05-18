@@ -23,10 +23,20 @@ async function loadNotes() {
 
     const snap = await getDocs(q);
 
-    return snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
+    return snap.docs.map(d => {
+      const payload = d.data();
+      return {
+        id: d.id,
+        text: payload.text ?? "",
+        spotifyUrl: payload.spotifyUrl ?? "",
+        colorIdx: payload.colorIdx ?? 0,
+        x: payload.x ?? 20,
+        y: payload.y ?? 20,
+        zIndex: payload.zIndex ?? 1,
+        createdAt: payload.createdAt ?? 0,
+        ...payload
+      };
+    });
 
   } catch (e) {
     console.error("loadNotes:", e);
