@@ -97,6 +97,47 @@ function buildBodyCss(bg) {
   return `background:${stops[0]};background-image:${bgImg};`;
 }
 
+const GLOBAL_CSS = `
+*{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
+html,body,#root{margin:0;padding:0;width:100%;min-height:100vh;overflow:hidden;}
+#root{border:none;}
+input,textarea{font-size:16px!important;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+`;
+
+function GlobalStyles({ bodyCss }) {
+  return (
+    <>
+      <style>{GLOBAL_CSS}</style>
+      <style>{`body{${bodyCss}}`}</style>
+    </>
+  );
+}
+
+function SaveDot({ status }) {
+  return (
+    <div style={{ display:"flex",alignItems:"center",gap:4,opacity:status==="idle"?0:1,transition:"opacity 0.4s" }}>
+      <div style={{ width:6,height:6,borderRadius:"50%",background:status==="saved"?"#4ade80":"#facc15",transition:"background 0.3s" }} />
+      <span style={{ fontSize:10,color:"rgba(255,255,255,0.45)",fontFamily:"sans-serif" }}>
+        {status === "saving" ? "saving..." : "saved"}
+      </span>
+    </div>
+  );
+}
+
+function EmotionButton({ bg, small, onOpen }) {
+  return (
+    <button
+      onClick={onOpen}
+      style={{ background:`${bg?.config?.accent||"#fff"}18`,border:`1px solid ${bg?.config?.accent||"#fff"}40`,borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:small?4:6,padding:small?"5px 9px":"6px 12px",color:"rgba(255,255,255,0.75)",fontSize:small?11:12,fontFamily:"sans-serif",WebkitTapHighlightColor:"transparent",transition:"all 0.2s" }}
+    >
+      <span style={{ fontSize:small?13:14 }}>{bg?.emoji || "🎨"}</span>
+      {!small && <span style={{ color:bg?.config?.accent||"rgba(255,255,255,0.6)" }}>{bg?.label || "mood"}</span>}
+    </button>
+  );
+}
+
 const SPOTIFY_ICON = (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="white">
     <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
@@ -448,7 +489,7 @@ export default function UnsentWall() {
     } catch {}
   }, [meta]);
 
-  useEffect(() => { notes.forEach(n => n.spotifyUrl && fetchMeta(n.spotifyUrl)); }, [notes]);
+  useEffect(() => { notes.forEach(n => n.spotifyUrl && fetchMeta(n.spotifyUrl)); }, [notes, fetchMeta]);
 
   const updateNotes = useCallback((fn) => {
     setNotes(prev => {
@@ -495,25 +536,6 @@ export default function UnsentWall() {
 
   // ── Shared tiny components ────────────────────────────────────────────────
 
-  const SaveDot = () => (
-    <div style={{ display:"flex",alignItems:"center",gap:4,opacity:saveStatus==="idle"?0:1,transition:"opacity 0.4s" }}>
-      <div style={{ width:6,height:6,borderRadius:"50%",background:saveStatus==="saved"?"#4ade80":"#facc15",transition:"background 0.3s" }} />
-      <span style={{ fontSize:10,color:"rgba(255,255,255,0.45)",fontFamily:"sans-serif" }}>
-        {saveStatus === "saving" ? "saving..." : "saved"}
-      </span>
-    </div>
-  );
-
-  const EmotionButton = ({ small }) => (
-    <button
-      onClick={() => setShowBgPick(true)}
-      style={{ background:`${bg?.config?.accent||"#fff"}18`,border:`1px solid ${bg?.config?.accent||"#fff"}40`,borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",gap:small?4:6,padding:small?"5px 9px":"6px 12px",color:"rgba(255,255,255,0.75)",fontSize:small?11:12,fontFamily:"sans-serif",WebkitTapHighlightColor:"transparent",transition:"all 0.2s" }}
-    >
-      <span style={{ fontSize:small?13:14 }}>{bg?.emoji || "🎨"}</span>
-      {!small && <span style={{ color:bg?.config?.accent||"rgba(255,255,255,0.6)" }}>{bg?.label || "mood"}</span>}
-    </button>
-  );
-
   const WallCanvas = () => (
     <div
       ref={wallRef}
@@ -536,14 +558,7 @@ export default function UnsentWall() {
   if (mobile) {
     return (
       <>
-        <style>{`
-          *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
-          html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}
-          input,textarea{font-size:16px!important;}
-          @keyframes spin{to{transform:rotate(360deg)}}
-          @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-        `}</style>
-        <style>{`body{${bodyCss}}`}</style>
+        <GlobalStyles bodyCss={bodyCss} />
 
         <div style={{ display:"flex",flexDirection:"column",width:"100vw",height:"100vh",overflow:"hidden" }}>
 
@@ -554,10 +569,10 @@ export default function UnsentWall() {
                 <h1 style={{ margin:0,fontSize:16,fontWeight:700,color:"#fff",letterSpacing:"-0.3px",lineHeight:1,fontFamily:"Georgia,serif" }}>unsent wall</h1>
                 <p style={{ margin:"1px 0 0",fontSize:9,color:"rgba(255,255,255,0.32)",letterSpacing:"1.3px",textTransform:"uppercase",fontFamily:"sans-serif" }}>anonymous · open</p>
               </div>
-              <SaveDot />
+              <SaveDot status={saveStatus} />
             </div>
             <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-              <EmotionButton small />
+              <EmotionButton bg={bg} onOpen={() => setShowBgPick(true)} small />
               <button
                 onClick={() => { setComposing(true); setTimeout(() => textRef.current?.focus(), 80); }}
                 style={{ background:"rgba(255,255,255,0.13)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"6px 13px",borderRadius:999,fontSize:12.5,cursor:"pointer",fontFamily:"sans-serif",display:"flex",alignItems:"center",gap:5 }}
@@ -684,8 +699,7 @@ export default function UnsentWall() {
   // ── DESKTOP / TABLET ──────────────────────────────────────────────────────
   return (
     <>
-      <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <style>{`body{${bodyCss}}`}</style>
+      <GlobalStyles bodyCss={bodyCss} />
 
       <div style={{ display:"flex",flexDirection:"column",width:"100vw",height:"100vh",overflow:"hidden",position:"relative" }}>
 
@@ -696,11 +710,11 @@ export default function UnsentWall() {
               <h1 style={{ margin:0,fontSize:tablet?18:20,fontWeight:700,color:"#fff",letterSpacing:"-0.4px",lineHeight:1,fontFamily:"Georgia,serif" }}>unsent wall</h1>
               <p style={{ margin:"1px 0 0",fontSize:9.5,color:"rgba(255,255,255,0.32)",letterSpacing:"1.8px",textTransform:"uppercase",fontFamily:"sans-serif" }}>anonymous · public · open</p>
             </div>
-            <SaveDot />
+            <SaveDot status={saveStatus} />
           </div>
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             <span style={{ fontSize:11,color:"rgba(255,255,255,0.35)",fontFamily:"sans-serif" }}>{notes.length} notes</span>
-            <EmotionButton />
+            <EmotionButton bg={bg} onOpen={() => setShowBgPick(true)} />
             <button
               onClick={() => { setComposing(true); setTimeout(() => textRef.current?.focus(), 60); }}
               style={{ background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:tablet?"7px 15px":"7px 18px",borderRadius:999,fontSize:tablet?12:13,cursor:"pointer",fontFamily:"sans-serif",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",gap:5 }}
