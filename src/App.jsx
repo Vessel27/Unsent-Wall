@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-// ── Firebase storage functions (replaces window.storage) ────────────────────
+// ── Firebase storage functions ───────────────────────────────────────────────
 
 async function loadNotes() {
   try {
@@ -35,15 +35,56 @@ async function saveBg(bg) {
   } catch (e) { console.error("saveBg:", e); }
 }
 
+// ── Spotify token cache ──────────────────────────────────────────────────────
+// Credentials from your Spotify Developer Dashboard.
+// The token fetch goes through:
+//   • Local dev  → Vite proxy at /spotify-token  (see vite.config.js)
+//   • Production → Firebase Function at /api/spotify-token  (see functions/index.js)
+// Both avoid the CORS block that happens when calling accounts.spotify.com directly.
+const SPOTIFY_CLIENT_ID     = "555fee84ed3548f39c39e053072d7dbd";
+const SPOTIFY_CLIENT_SECRET = "81194c963cd348e799424b126e0a5a0a";
+
+let _spotifyToken    = null;
+let _spotifyTokenExp = 0;
+
+async function getSpotifyToken() {
+  if (_spotifyToken && Date.now() < _spotifyTokenExp) return _spotifyToken;
+  try {
+    // In dev, Vite proxies /spotify-token → accounts.spotify.com/api/token
+    // In prod, your Firebase Function handles /api/spotify-token
+    const isDev     = import.meta.env?.DEV ?? false;
+    const tokenUrl  = isDev ? "/spotify-token" : "/api/spotify-token";
+    const r = await fetch(tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: "Basic " + btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`),
+      },
+      body: "grant_type=client_credentials",
+    });
+    if (!r.ok) {
+      console.error("Spotify token fetch failed:", r.status, await r.text());
+      return null;
+    }
+    const d = await r.json();
+    _spotifyToken    = d.access_token;
+    _spotifyTokenExp = Date.now() + (d.expires_in - 60) * 1000;
+    return _spotifyToken;
+  } catch (e) {
+    console.error("Spotify token error:", e);
+    return null;
+  }
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const STICKY_COLORS = [
   { name:"lemon", bg:"#FFF176", shadow:"#F9A825", text:"#3E2723", lines:"#F9A82555" },
-  { name:"rose",  bg:"#FFCDD2", shadow:"#E53935", text:"#3E0012",  lines:"#E5393540" },
-  { name:"mint",  bg:"#C8E6C9", shadow:"#388E3C", text:"#0a2e0c",  lines:"#388E3C40" },
-  { name:"sky",   bg:"#B3E5FC", shadow:"#0288D1", text:"#01233a",  lines:"#0288D140" },
-  { name:"lilac", bg:"#E1BEE7", shadow:"#8E24AA", text:"#1a0026",  lines:"#8E24AA40" },
-  { name:"peach", bg:"#FFE0B2", shadow:"#EF6C00", text:"#3e1400",  lines:"#EF6C0040" },
+  { name:"rose",  bg:"#FFCDD2", shadow:"#E53935", text:"#3E0012", lines:"#E5393540" },
+  { name:"mint",  bg:"#C8E6C9", shadow:"#388E3C", text:"#0a2e0c", lines:"#388E3C40" },
+  { name:"sky",   bg:"#B3E5FC", shadow:"#0288D1", text:"#01233a", lines:"#0288D140" },
+  { name:"lilac", bg:"#E1BEE7", shadow:"#8E24AA", text:"#1a0026", lines:"#8E24AA40" },
+  { name:"peach", bg:"#FFE0B2", shadow:"#EF6C00", text:"#3e1400", lines:"#EF6C0040" },
 ];
 
 const EMOTION_BACKGROUNDS = [
@@ -141,17 +182,9 @@ function EmotionButton({ bg, small, onOpen }) {
 function ZoomControls({ zoom, onZoomOut, onZoomIn }) {
   return (
     <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-      <button
-        onClick={onZoomOut}
-        style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }}
-        type="button"
-      >−</button>
+      <button onClick={onZoomOut} style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }} type="button">−</button>
       <span style={{ minWidth:44,textAlign:"center",fontSize:12,color:"rgba(255,255,255,0.85)",fontFamily:"sans-serif" }}>{Math.round(zoom * 100)}%</span>
-      <button
-        onClick={onZoomIn}
-        style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }}
-        type="button"
-      >+</button>
+      <button onClick={onZoomIn} style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }} type="button">+</button>
     </div>
   );
 }
@@ -216,6 +249,161 @@ function Spinner() {
     <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"300px",gap:14 }}>
       <div style={{ width:32,height:32,border:"2.5px solid rgba(255,255,255,0.12)",borderTop:"2.5px solid rgba(255,255,255,0.65)",borderRadius:"50%",animation:"spin 0.8s linear infinite" }} />
       <p style={{ margin:0,fontSize:12,color:"rgba(255,255,255,0.38)",fontFamily:"sans-serif",letterSpacing:"1px" }}>loading the wall...</p>
+    </div>
+  );
+}
+
+// ── Spotify Search component ─────────────────────────────────────────────────
+
+function SpotifySearch({ col, onSelect, initialSelected }) {
+  const [query,       setQuery]       = useState("");
+  const [results,     setResults]     = useState([]);
+  const [searching,   setSearching]   = useState(false);
+  const [selected,    setSelected]    = useState(initialSelected || null);
+  const [errorMsg,    setErrorMsg]    = useState("");
+  const debounceRef = useRef(null);
+
+  const search = useCallback(async (q) => {
+    if (!q.trim()) { setResults([]); return; }
+    setSearching(true);
+    setErrorMsg("");
+    try {
+      const token = await getSpotifyToken();
+      if (!token) {
+        setErrorMsg("Spotify unavailable — paste a link instead");
+        setSearching(false);
+        return;
+      }
+      const r = await fetch(
+        `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=5`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) { setResults([]); setSearching(false); return; }
+      const d = await r.json();
+      setResults(d.tracks?.items || []);
+    } catch {
+      setResults([]);
+      setErrorMsg("Search failed — check your connection");
+    }
+    setSearching(false);
+  }, []);
+
+  const handleChange = (e) => {
+    const q = e.target.value;
+    setQuery(q);
+    setErrorMsg("");
+    clearTimeout(debounceRef.current);
+    if (!q.trim()) { setResults([]); return; }
+    debounceRef.current = setTimeout(() => search(q), 420);
+  };
+
+  const pick = (track) => {
+    const url = `https://open.spotify.com/track/${track.id}`;
+    const trackMeta = {
+      title: `${track.name} — ${track.artists.map(a => a.name).join(", ")}`,
+      cover: track.album.images[2]?.url || track.album.images[0]?.url,
+    };
+    setSelected({ track, meta: trackMeta, url });
+    setQuery("");
+    setResults([]);
+    onSelect(url, trackMeta);
+  };
+
+  const clear = () => {
+    setSelected(null);
+    setQuery("");
+    setResults([]);
+    onSelect("", null);
+  };
+
+  return (
+    <div style={{ marginTop:12 }}>
+      <label style={{ fontSize:11.5,fontFamily:"sans-serif",color:col.text,opacity:0.55,display:"block",marginBottom:5 }}>
+        🎵 Add a song (optional)
+      </label>
+
+      {selected ? (
+        /* ── Selected state ── */
+        <div style={{ display:"flex",alignItems:"center",gap:8,background:"rgba(0,0,0,0.09)",borderRadius:10,padding:"8px 10px" }}>
+          {selected.track.album.images[2]?.url && (
+            <img
+              src={selected.track.album.images[2].url}
+              alt=""
+              style={{ width:36,height:36,borderRadius:5,objectFit:"cover",flexShrink:0 }}
+            />
+          )}
+          <div style={{ flex:1,overflow:"hidden" }}>
+            <div style={{ fontSize:12.5,color:col.text,fontFamily:"sans-serif",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+              {selected.track.name}
+            </div>
+            <div style={{ fontSize:10.5,color:col.text,opacity:0.6,fontFamily:"sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+              {selected.track.artists.map(a => a.name).join(", ")} · {selected.track.album.name}
+            </div>
+          </div>
+          <button
+            onClick={clear}
+            style={{ background:"rgba(0,0,0,0.12)",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",fontSize:14,color:col.text,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1 }}
+          >×</button>
+        </div>
+      ) : (
+        /* ── Search state ── */
+        <div style={{ position:"relative" }}>
+          <div style={{ position:"relative" }}>
+            <input
+              value={query}
+              onChange={handleChange}
+              placeholder="search for a song or artist..."
+              style={{ width:"100%",background:"rgba(0,0,0,0.09)",border:"none",borderRadius:8,padding:"10px 36px 10px 11px",fontSize:16,fontFamily:"sans-serif",color:col.text,outline:"none",boxSizing:"border-box" }}
+            />
+            {/* Spotify icon or spinner inside input */}
+            <div style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center" }}>
+              {searching
+                ? <div style={{ width:14,height:14,border:`1.5px solid ${col.text}40`,borderTop:`1.5px solid ${col.text}aa`,borderRadius:"50%",animation:"spin 0.7s linear infinite" }} />
+                : <div style={{ width:18,height:18,borderRadius:3,background:"#1DB954",display:"flex",alignItems:"center",justifyContent:"center" }}>{SPOTIFY_ICON}</div>
+              }
+            </div>
+          </div>
+
+          {errorMsg && (
+            <p style={{ margin:"5px 0 0",fontSize:10.5,color:col.text,opacity:0.5,fontFamily:"sans-serif" }}>{errorMsg}</p>
+          )}
+
+          {/* Results dropdown */}
+          {results.length > 0 && (
+            <div style={{ position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:col.bg,borderRadius:11,boxShadow:"0 8px 32px rgba(0,0,0,0.32)",zIndex:999,overflow:"hidden",border:`1px solid ${col.shadow}25` }}>
+              {results.map((track, idx) => (
+                <button
+                  key={track.id}
+                  onClick={() => pick(track)}
+                  style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"transparent",border:"none",borderBottom:idx < results.length - 1 ? `1px solid ${col.shadow}18` : "none",cursor:"pointer",textAlign:"left",WebkitTapHighlightColor:"transparent" }}
+                >
+                  <img
+                    src={track.album.images[2]?.url || track.album.images[0]?.url}
+                    alt=""
+                    style={{ width:38,height:38,borderRadius:5,objectFit:"cover",flexShrink:0 }}
+                  />
+                  <div style={{ overflow:"hidden",flex:1 }}>
+                    <div style={{ fontSize:13,color:col.text,fontFamily:"sans-serif",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                      {track.name}
+                    </div>
+                    <div style={{ fontSize:10.5,color:col.text,opacity:0.6,fontFamily:"sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                      {track.artists.map(a => a.name).join(", ")} · {track.album.name}
+                    </div>
+                  </div>
+                  <div style={{ fontSize:10,color:col.text,opacity:0.35,fontFamily:"sans-serif",flexShrink:0 }}>
+                    {Math.floor(track.duration_ms / 60000)}:{String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2,"0")}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* No results */}
+          {!searching && query.trim() && results.length === 0 && !errorMsg && (
+            <p style={{ margin:"5px 0 0",fontSize:10.5,color:col.text,opacity:0.45,fontFamily:"sans-serif" }}>no tracks found — try a different search</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -358,10 +546,10 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef, zoom }) {
     const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
     startRef.current = { x: clientX, y: clientY };
 
-    const rect = wallRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const rect  = wallRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
     const scale = zoom || 1;
-    const ox   = clientX - rect.left - posRef.current.x * scale;
-    const oy   = clientY - rect.top  - posRef.current.y * scale;
+    const ox    = clientX - rect.left - posRef.current.x * scale;
+    const oy    = clientY - rect.top  - posRef.current.y * scale;
     lastRef.current = { x: clientX, y: clientY, t: Date.now() };
     applyTransform(posRef.current.x, posRef.current.y, true, false);
 
@@ -373,14 +561,14 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef, zoom }) {
       const dy = cy - startRef.current.y;
       if (!movedRef.current && Math.hypot(dx, dy) > 4) movedRef.current = true;
       if (!movedRef.current) return;
-      const now = Date.now();
-      const dt  = Math.max(1, now - lastRef.current.t);
-      velRef.current  = { x: (cx - lastRef.current.x) / dt * 16, y: (cy - lastRef.current.y) / dt * 16 };
+      const now      = Date.now();
+      const dt       = Math.max(1, now - lastRef.current.t);
+      velRef.current = { x: (cx - lastRef.current.x) / dt * 16, y: (cy - lastRef.current.y) / dt * 16 };
       lastRef.current = { x: cx, y: cy, t: now };
       const wallRect  = wallRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
-      const scale     = zoom || 1;
-      let nx = (cx - wallRect.left - ox) / scale;
-      let ny = (cy - wallRect.top  - oy) / scale;
+      const sc        = zoom || 1;
+      let nx = (cx - wallRect.left - ox) / sc;
+      let ny = (cy - wallRect.top  - oy) / sc;
       if (wallRef.current) {
         nx = Math.max(0, Math.min(nx, wallRef.current.offsetWidth  - noteW));
         ny = Math.max(0, Math.min(ny, wallRef.current.offsetHeight - 220));
@@ -423,13 +611,13 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef, zoom }) {
       onPointerDown={onPointerDown}
       onTouchStart={onPointerDown}
       style={{
-        position:"absolute", left:note.x, top:note.y, width:noteW, zIndex:note.zIndex,
-        background:c.bg, borderRadius:"2px 11px 11px 2px", overflow:"hidden",
+        position:"absolute",left:note.x,top:note.y,width:noteW,zIndex:note.zIndex,
+        background:c.bg,borderRadius:"2px 11px 11px 2px",overflow:"hidden",
         boxShadow:"4px 6px 22px rgba(0,0,0,0.38),1px 1px 0 rgba(255,255,255,0.6) inset",
-        cursor:"grab", transform:`rotate(${rot}deg) scale(1)`,
+        cursor:"grab",transform:`rotate(${rot}deg) scale(1)`,
         willChange:"transform, left, top, box-shadow",
-        userSelect:"none", WebkitUserSelect:"none",
-        touchAction:"none", WebkitTouchCallout:"none",
+        userSelect:"none",WebkitUserSelect:"none",
+        touchAction:"none",WebkitTouchCallout:"none",
       }}
     >
       <Tape />
@@ -464,17 +652,12 @@ export default function UnsentWall() {
   const [meta,       setMeta]       = useState({});
   const [saveStatus, setSaveStatus] = useState("idle");
   const [mobileTab,  setMobileTab]  = useState("wall");
+  const [desktopTab, setDesktopTab] = useState("wall");
   const [zoom,       setZoom]       = useState(1);
 
   const wallRef   = useRef(null);
-  const pinchRef  = useRef({ active:false, startDist:0, startZoom:1, currentZoom:1 });
   const textRef   = useRef(null);
   const saveTimer = useRef(null);
-
-  const getTouchDistance = (touches) => {
-    const [a,b] = touches;
-    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-  };
 
   // ── Load from Firestore on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -506,7 +689,7 @@ export default function UnsentWall() {
     }, 800);
   }, []);
 
-  // ── Spotify oEmbed metadata ───────────────────────────────────────────────
+  // ── Spotify oEmbed metadata (for notes loaded from DB that only have a URL) ─
   const fetchMeta = useCallback(async (url) => {
     if (!url || meta[url]) return;
     try {
@@ -540,31 +723,12 @@ export default function UnsentWall() {
 
   const changeBg = useCallback((newBg) => { setBg(newBg); saveBg(newBg); }, []);
 
-  const handlePinchStart = useCallback((e) => {
-    if (!mobile || e.touches.length !== 2) return;
-    if (Array.from(e.touches).some(t => t.target.closest(".sticky-note"))) return;
-    const dist = getTouchDistance(e.touches);
-    pinchRef.current.active = true;
-    pinchRef.current.startDist = dist;
-    pinchRef.current.startZoom = zoom;
-    pinchRef.current.currentZoom = zoom;
-    e.preventDefault();
-  }, [mobile, zoom]);
-
-  const handlePinchMove = useCallback((e) => {
-    if (!mobile || !pinchRef.current.active || e.touches.length !== 2) return;
-    const dist = getTouchDistance(e.touches);
-    const nextZoom = clampZoom(pinchRef.current.startZoom * (dist / pinchRef.current.startDist));
-    pinchRef.current.currentZoom = nextZoom;
-    if (wallRef.current) wallRef.current.style.transform = `scale(${nextZoom})`;
-    e.preventDefault();
-  }, [mobile]);
-
-  const handlePinchEnd = useCallback(() => {
-    if (pinchRef.current.active) {
-      setZoom(pinchRef.current.currentZoom);
+  // ── Called by SpotifySearch when user picks a track ───────────────────────
+  const handleSpotifySelect = useCallback((url, trackMeta) => {
+    setDraft(d => ({ ...d, url }));
+    if (url && trackMeta) {
+      setMeta(p => ({ ...p, [url]: trackMeta }));
     }
-    pinchRef.current.active = false;
   }, []);
 
   const post = () => {
@@ -584,23 +748,16 @@ export default function UnsentWall() {
 
   const clampZoom = (value) => Math.min(1.4, Math.max(0.72, value));
   const zoomStep  = 0.14;
-  const onSpotify = url => { setDraft(d => ({ ...d, url })); fetchMeta(url); };
 
-  const col       = STICKY_COLORS[draft.colorIdx];
-  const draftMeta = meta[draft.url];
+  const col      = STICKY_COLORS[draft.colorIdx];
   const wallStyle = buildWallStyle(bg);
   const bodyCss   = buildBodyCss(bg);
 
-  // ── Shared tiny components ────────────────────────────────────────────────
-
+  // ── Wall canvas (shared between mobile/desktop) ───────────────────────────
   const WallCanvas = () => (
     <div
       ref={wallRef}
-      onTouchStart={handlePinchStart}
-      onTouchMove={handlePinchMove}
-      onTouchEnd={handlePinchEnd}
-      onTouchCancel={handlePinchEnd}
-      style={{ position:"relative", width:WALL_W, height:WALL_H, ...wallStyle, touchAction:"none", transform:`scale(${zoom})`, transformOrigin:"top left", willChange:"transform" }}
+      style={{ position:"relative",width:WALL_W,height:WALL_H,...wallStyle,touchAction:"pan-x pan-y",transform:`scale(${zoom})`,transformOrigin:"top left",willChange:"transform" }}
     >
       {loading && <Spinner />}
       {!loading && notes.length === 0 && (
@@ -614,6 +771,37 @@ export default function UnsentWall() {
       ))}
     </div>
   );
+
+  function NoteList({ notes, loading, onNoteClick }) {
+    return (
+      <div style={{ height:"100%",overflowY:"auto",overflowX:"hidden",padding:"18px 18px 24px",display:"flex",flexDirection:"column",gap:12,WebkitOverflowScrolling:"touch" }}>
+        {loading ? (
+          <Spinner />
+        ) : notes.length === 0 ? (
+          <div style={{ textAlign:"center",marginTop:60,color:"rgba(255,255,255,0.35)",fontFamily:"sans-serif",fontSize:13 }}>no notes yet — be the first!</div>
+        ) : notes.map((n, i) => {
+          const c = STICKY_COLORS[n.colorIdx];
+          return (
+            <div key={n.id} onClick={() => onNoteClick(n)}
+              style={{ animation:`fadeUp 0.3s ease ${Math.min(i,8)*0.04}s both`,background:c.bg,borderRadius:13,padding:"15px 15px 13px",position:"relative",overflow:"hidden",boxShadow:"0 3px 14px rgba(0,0,0,0.22),1px 1px 0 rgba(255,255,255,0.5) inset",cursor:"pointer",userSelect:"none",WebkitUserSelect:"none" }}
+            >
+              <div style={{ position:"absolute",inset:0,backgroundImage:`repeating-linear-gradient(transparent,transparent 23px,${c.lines} 23px,${c.lines} 24px)`,backgroundPosition:"0 32px",opacity:0.4,pointerEvents:"none" }} />
+              <div style={{ position:"absolute",top:-5,left:"50%",transform:"translateX(-50%)",width:40,height:13,background:"rgba(255,255,255,0.55)",borderRadius:2 }} />
+              <p style={{ margin:0,fontSize:13,lineHeight:1.7,color:c.text,fontFamily:"Georgia,serif",wordBreak:"break-word",paddingTop:7,position:"relative" }}>
+                {n.text.length > 140 ? n.text.slice(0,137) + "…" : n.text}
+              </p>
+              {n.spotifyUrl && (
+                <div style={{ marginTop:7,display:"flex",alignItems:"center",gap:5,background:"rgba(0,0,0,0.09)",borderRadius:7,padding:"3px 7px",position:"relative",width:"fit-content" }}>
+                  <div style={{ width:14,height:14,borderRadius:3,background:"#1DB954",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{SPOTIFY_ICON}</div>
+                  <span style={{ fontSize:9.5,color:c.text,opacity:0.65,fontFamily:"sans-serif" }}>has a song</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   // ── MOBILE ────────────────────────────────────────────────────────────────
   if (mobile) {
@@ -634,6 +822,7 @@ export default function UnsentWall() {
             </div>
             <div style={{ display:"flex",alignItems:"center",gap:8 }}>
               <EmotionButton bg={bg} onOpen={() => setShowBgPick(true)} small />
+              <ZoomControls zoom={zoom} onZoomOut={() => setZoom(z => clampZoom(z - zoomStep))} onZoomIn={() => setZoom(z => clampZoom(z + zoomStep))} />
               <button
                 onClick={() => { setComposing(true); setTimeout(() => textRef.current?.focus(), 80); }}
                 style={{ background:"rgba(255,255,255,0.13)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:"6px 13px",borderRadius:999,fontSize:12.5,cursor:"pointer",fontFamily:"sans-serif",display:"flex",alignItems:"center",gap:5 }}
@@ -659,30 +848,7 @@ export default function UnsentWall() {
               </div>
             )}
             {mobileTab === "list" && (
-              <div style={{ height:"100%",overflowY:"auto",overflowX:"hidden",padding:"12px 12px 80px",display:"flex",flexDirection:"column",gap:12,WebkitOverflowScrolling:"touch" }}>
-                {loading ? <Spinner /> : notes.length === 0 ? (
-                  <div style={{ textAlign:"center",marginTop:60,color:"rgba(255,255,255,0.35)",fontFamily:"sans-serif",fontSize:13 }}>no notes yet — be the first!</div>
-                ) : notes.map((n, i) => {
-                  const c = STICKY_COLORS[n.colorIdx];
-                  return (
-                    <div key={n.id} onClick={() => setModal(n)}
-                      style={{ animation:`fadeUp 0.3s ease ${Math.min(i,8)*0.04}s both`,background:c.bg,borderRadius:13,padding:"15px 15px 13px",position:"relative",overflow:"hidden",boxShadow:"0 3px 14px rgba(0,0,0,0.22),1px 1px 0 rgba(255,255,255,0.5) inset",cursor:"pointer",userSelect:"none",WebkitUserSelect:"none" }}
-                    >
-                      <div style={{ position:"absolute",inset:0,backgroundImage:`repeating-linear-gradient(transparent,transparent 23px,${c.lines} 23px,${c.lines} 24px)`,backgroundPosition:"0 32px",opacity:0.4,pointerEvents:"none" }} />
-                      <div style={{ position:"absolute",top:-5,left:"50%",transform:"translateX(-50%)",width:40,height:13,background:"rgba(255,255,255,0.55)",borderRadius:2 }} />
-                      <p style={{ margin:0,fontSize:13,lineHeight:1.7,color:c.text,fontFamily:"Georgia,serif",wordBreak:"break-word",paddingTop:7,position:"relative" }}>
-                        {n.text.length > 140 ? n.text.slice(0,137) + "…" : n.text}
-                      </p>
-                      {n.spotifyUrl && (
-                        <div style={{ marginTop:7,display:"flex",alignItems:"center",gap:5,background:"rgba(0,0,0,0.09)",borderRadius:7,padding:"3px 7px",position:"relative",width:"fit-content" }}>
-                          <div style={{ width:14,height:14,borderRadius:3,background:"#1DB954",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{SPOTIFY_ICON}</div>
-                          <span style={{ fontSize:9.5,color:c.text,opacity:0.65,fontFamily:"sans-serif" }}>has a song</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <NoteList notes={notes} loading={loading} onNoteClick={setModal} />
             )}
           </div>
 
@@ -699,7 +865,7 @@ export default function UnsentWall() {
 
         {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
 
-        {/* Compose sheet */}
+        {/* Compose sheet — MOBILE */}
         {composing && (
           <div
             onClick={e => { if (e.target === e.currentTarget) setComposing(false); }}
@@ -715,24 +881,29 @@ export default function UnsentWall() {
                     style={{ width:32,height:32,borderRadius:"50%",background:c.bg,border:draft.colorIdx===i?`3px solid ${c.shadow}`:"2px solid rgba(0,0,0,0.12)",cursor:"pointer",transition:"transform 0.14s",transform:draft.colorIdx===i?"scale(1.2)":"scale(1)",flexShrink:0 }} />
                 ))}
               </div>
-              <textarea ref={textRef} value={draft.text} onChange={e => setDraft(d => ({ ...d, text:e.target.value }))}
-                placeholder="write what you never said..." rows={5}
-                style={{ width:"100%",background:"transparent",border:"none",borderBottom:`1.5px solid ${col.shadow}40`,resize:"none",fontSize:16,fontFamily:"Georgia,serif",color:col.text,outline:"none",lineHeight:1.7,padding:"4px 0",boxSizing:"border-box" }} />
-              <div style={{ marginTop:13 }}>
-                <label style={{ fontSize:11.5,fontFamily:"sans-serif",color:col.text,opacity:0.55,display:"block",marginBottom:5 }}>🎵 Spotify link (optional)</label>
-                <input value={draft.url} onChange={e => onSpotify(e.target.value)} placeholder="https://open.spotify.com/track/..."
-                  style={{ width:"100%",background:"rgba(0,0,0,0.09)",border:"none",borderRadius:8,padding:"11px",fontSize:16,fontFamily:"sans-serif",color:col.text,outline:"none",boxSizing:"border-box" }} />
-                {draft.url && draftMeta && <SpotifyChip cover={draftMeta.cover} title={draftMeta.title} col={col} big />}
-              </div>
+              <textarea
+                ref={textRef}
+                value={draft.text}
+                onChange={e => setDraft(d => ({ ...d, text:e.target.value }))}
+                placeholder="write what you never said..."
+                rows={5}
+                style={{ width:"100%",background:"transparent",border:"none",borderBottom:`1.5px solid ${col.shadow}40`,resize:"none",fontSize:16,fontFamily:"Georgia,serif",color:col.text,outline:"none",lineHeight:1.7,padding:"4px 0",boxSizing:"border-box" }}
+              />
+              {/* ── Spotify Search ── */}
+              <SpotifySearch
+                col={col}
+                onSelect={handleSpotifySelect}
+                initialSelected={null}
+              />
               <div style={{ display:"flex",gap:9,marginTop:18 }}>
-                <button onClick={() => setComposing(false)} style={{ flex:1,padding:"13px 0",borderRadius:11,border:`1.5px solid ${col.shadow}50`,background:"transparent",cursor:"pointer",fontSize:14,fontFamily:"sans-serif",color:col.text }}>cancel</button>
+                <button onClick={() => { setComposing(false); setDraft({ text:"", url:"", colorIdx:0 }); }} style={{ flex:1,padding:"13px 0",borderRadius:11,border:`1.5px solid ${col.shadow}50`,background:"transparent",cursor:"pointer",fontSize:14,fontFamily:"sans-serif",color:col.text }}>cancel</button>
                 <button onClick={post} disabled={!draft.text.trim()} style={{ flex:2,padding:"13px 0",borderRadius:11,background:col.shadow,border:"none",cursor:draft.text.trim()?"pointer":"not-allowed",fontSize:14,fontFamily:"sans-serif",color:"#fff",fontWeight:600,opacity:draft.text.trim()?1:0.42,transition:"opacity 0.2s" }}>post to wall</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Note modal */}
+        {/* Note modal — MOBILE */}
         {modal && (() => {
           const mc  = STICKY_COLORS[modal.colorIdx];
           const emb = getEmbedUrl(modal.spotifyUrl);
@@ -786,20 +957,32 @@ export default function UnsentWall() {
           </div>
         </header>
 
-        {/* Wall */}
-        <div style={{ flex:1,overflow:"auto" }}>
-          <div ref={wallRef} style={{ position:"relative",width:WALL_W,height:WALL_H,...wallStyle,transform:`scale(${zoom})`,transformOrigin:"top left" }}>
-            {loading && <Spinner />}
-            {!loading && notes.length === 0 && (
-              <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none" }}>
-                <p style={{ fontSize:22,color:"rgba(255,255,255,0.2)",fontFamily:"Georgia,serif",margin:0 }}>the wall is empty</p>
-                <p style={{ fontSize:13,color:"rgba(255,255,255,0.13)",fontFamily:"sans-serif",margin:"10px 0 0" }}>be the first to leave a note</p>
-              </div>
-            )}
-            {!loading && notes.map(n => (
-              <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} zoom={zoom} />
+        <div style={{ flex:1,overflow:"hidden",display:"flex",flexDirection:"column" }}>
+          <div style={{ flexShrink:0,display:"flex",background:"rgba(0,0,0,0.25)",borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+            {[["wall","🗺 wall"],["list","📋 list"]].map(([t,label]) => (
+              <button key={t} onClick={() => setDesktopTab(t)}
+                style={{ flex:1,padding:"10px 0",background:"transparent",border:"none",borderBottom:desktopTab===t?`2px solid ${bg?.config?.accent||"rgba(255,255,255,0.65)"}`:"2px solid transparent",color:desktopTab===t?"#fff":"rgba(255,255,255,0.4)",fontSize:12,fontFamily:"sans-serif",cursor:"pointer",transition:"all 0.16s" }}
+              >{label}</button>
             ))}
           </div>
+          {desktopTab === "wall" ? (
+            <div style={{ flex:1,overflow:"auto" }}>
+              <div ref={wallRef} style={{ position:"relative",width:WALL_W,height:WALL_H,...wallStyle,transform:`scale(${zoom})`,transformOrigin:"top left" }}>
+                {loading && <Spinner />}
+                {!loading && notes.length === 0 && (
+                  <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none" }}>
+                    <p style={{ fontSize:22,color:"rgba(255,255,255,0.2)",fontFamily:"Georgia,serif",margin:0 }}>the wall is empty</p>
+                    <p style={{ fontSize:13,color:"rgba(255,255,255,0.13)",fontFamily:"sans-serif",margin:"10px 0 0" }}>be the first to leave a note</p>
+                  </div>
+                )}
+                {!loading && notes.map(n => (
+                  <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} zoom={zoom} />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <NoteList notes={notes} loading={loading} onNoteClick={setModal} />
+          )}
         </div>
 
         {!loading && (
@@ -812,13 +995,13 @@ export default function UnsentWall() {
 
       {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
 
-      {/* Compose modal */}
+      {/* Compose modal — DESKTOP */}
       {composing && (
         <div
-          onClick={e => { if (e.target === e.currentTarget) setComposing(false); }}
+          onClick={e => { if (e.target === e.currentTarget) { setComposing(false); setDraft({ text:"", url:"", colorIdx:0 }); } }}
           style={{ position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:tablet?18:24,backdropFilter:"blur(5px)" }}
         >
-          <div style={{ background:col.bg,borderRadius:17,padding:tablet?"22px 20px 20px":"26px 24px 22px",width:"100%",maxWidth:tablet?390:430,boxShadow:"0 24px 60px rgba(0,0,0,0.4)",position:"relative" }}>
+          <div style={{ background:col.bg,borderRadius:17,padding:tablet?"22px 20px 20px":"26px 24px 22px",width:"100%",maxWidth:tablet?390:430,boxShadow:"0 24px 60px rgba(0,0,0,0.4)",position:"relative",overflow:"visible" }}>
             <div style={{ position:"absolute",top:-9,left:"50%",transform:"translateX(-50%)",width:54,height:19,background:"rgba(255,255,255,0.6)",borderRadius:3 }} />
             <h2 style={{ margin:"8px 0 2px",fontSize:17,fontWeight:700,color:col.text,fontFamily:"Georgia,serif" }}>leave a note</h2>
             <p style={{ margin:"0 0 12px",fontSize:10.5,color:col.text,opacity:0.52,fontFamily:"sans-serif" }}>anonymous · no account needed · visible to everyone</p>
@@ -828,24 +1011,29 @@ export default function UnsentWall() {
                   style={{ width:25,height:25,borderRadius:"50%",background:c.bg,border:draft.colorIdx===i?`3px solid ${c.shadow}`:"2px solid rgba(0,0,0,0.12)",cursor:"pointer",transition:"transform 0.14s",transform:draft.colorIdx===i?"scale(1.22)":"scale(1)",flexShrink:0 }} />
               ))}
             </div>
-            <textarea ref={textRef} value={draft.text} onChange={e => setDraft(d => ({ ...d, text:e.target.value }))}
-              placeholder="write what you never said..." rows={5}
-              style={{ width:"100%",background:"transparent",border:"none",borderBottom:`1.5px solid ${col.shadow}40`,resize:"none",fontSize:14.5,fontFamily:"Georgia,serif",color:col.text,outline:"none",lineHeight:1.7,padding:"3px 0",boxSizing:"border-box" }} />
-            <div style={{ marginTop:12 }}>
-              <label style={{ fontSize:11,fontFamily:"sans-serif",color:col.text,opacity:0.56,display:"block",marginBottom:5 }}>🎵 Spotify link (optional)</label>
-              <input value={draft.url} onChange={e => onSpotify(e.target.value)} placeholder="https://open.spotify.com/track/..."
-                style={{ width:"100%",background:"rgba(0,0,0,0.09)",border:"none",borderRadius:8,padding:tablet?"10px 11px":"9px 11px",fontSize:12.5,fontFamily:"sans-serif",color:col.text,outline:"none",boxSizing:"border-box" }} />
-              {draft.url && draftMeta && <SpotifyChip cover={draftMeta.cover} title={draftMeta.title} col={col} big />}
-            </div>
+            <textarea
+              ref={textRef}
+              value={draft.text}
+              onChange={e => setDraft(d => ({ ...d, text:e.target.value }))}
+              placeholder="write what you never said..."
+              rows={5}
+              style={{ width:"100%",background:"transparent",border:"none",borderBottom:`1.5px solid ${col.shadow}40`,resize:"none",fontSize:14.5,fontFamily:"Georgia,serif",color:col.text,outline:"none",lineHeight:1.7,padding:"3px 0",boxSizing:"border-box" }}
+            />
+            {/* ── Spotify Search ── */}
+            <SpotifySearch
+              col={col}
+              onSelect={handleSpotifySelect}
+              initialSelected={null}
+            />
             <div style={{ display:"flex",gap:9,marginTop:16 }}>
-              <button onClick={() => setComposing(false)} style={{ flex:1,padding:"10px 0",borderRadius:10,border:`1.5px solid ${col.shadow}50`,background:"transparent",cursor:"pointer",fontSize:13,fontFamily:"sans-serif",color:col.text }}>cancel</button>
+              <button onClick={() => { setComposing(false); setDraft({ text:"", url:"", colorIdx:0 }); }} style={{ flex:1,padding:"10px 0",borderRadius:10,border:`1.5px solid ${col.shadow}50`,background:"transparent",cursor:"pointer",fontSize:13,fontFamily:"sans-serif",color:col.text }}>cancel</button>
               <button onClick={post} disabled={!draft.text.trim()} style={{ flex:2,padding:"10px 0",borderRadius:10,background:col.shadow,border:"none",cursor:draft.text.trim()?"pointer":"not-allowed",fontSize:13,fontFamily:"sans-serif",color:"#fff",fontWeight:600,opacity:draft.text.trim()?1:0.42,transition:"opacity 0.2s" }}>post to wall</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Note modal */}
+      {/* Note modal — DESKTOP */}
       {modal && (() => {
         const mc  = STICKY_COLORS[modal.colorIdx];
         const emb = getEmbedUrl(modal.spotifyUrl);
