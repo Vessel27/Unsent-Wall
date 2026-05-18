@@ -116,41 +116,6 @@ async function saveBg(bg) {
 //   • Local dev  → Vite proxy at /spotify-token  (see vite.config.js)
 //   • Production → Firebase Function at /api/spotify-token  (see functions/index.js)
 // Both avoid the CORS block that happens when calling accounts.spotify.com directly.
-const SPOTIFY_CLIENT_ID     = "555fee84ed3548f39c39e053072d7dbd";
-const SPOTIFY_CLIENT_SECRET = "81194c963cd348e799424b126e0a5a0a";
-
-let _spotifyToken    = null;
-let _spotifyTokenExp = 0;
-
-async function getSpotifyToken() {
-  if (_spotifyToken && Date.now() < _spotifyTokenExp) return _spotifyToken;
-  try {
-    // In dev, Vite proxies /spotify-token → accounts.spotify.com/api/token
-    // In prod, your Firebase Function handles /api/spotify-token
-    const isDev     = import.meta.env?.DEV ?? false;
-    const tokenUrl  = isDev ? "/spotify-token" : "/api/spotify-token";
-    const r = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: "Basic " + btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`),
-      },
-      body: "grant_type=client_credentials",
-    });
-    if (!r.ok) {
-      console.error("Spotify token fetch failed:", r.status, await r.text());
-      return null;
-    }
-    const d = await r.json();
-    _spotifyToken    = d.access_token;
-    _spotifyTokenExp = Date.now() + (d.expires_in - 60) * 1000;
-    return _spotifyToken;
-  } catch (e) {
-    console.error("Spotify token error:", e);
-    return null;
-  }
-}
-
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const STICKY_COLORS = [
@@ -264,16 +229,22 @@ function ZoomControls({ zoom, onZoomOut, onZoomIn }) {
   );
 }
 
-const SPOTIFY_ICON = (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="white">
-    <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-  </svg>
-);
-
 function getEmbedUrl(url) {
   const m = url?.match(/spotify\.com\/(track|album|playlist|episode)\/([a-zA-Z0-9]+)/);
   return m ? `https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0` : null;
 }
+
+function normalizeSpotifyUrl(value) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const openMatch = trimmed.match(/^(https?:\/\/open\.spotify\.com\/(track|album|playlist|episode)\/([a-zA-Z0-9]+))(\?.*)?$/i);
+  if (openMatch) return openMatch[1];
+  const uriMatch = trimmed.match(/^spotify:(track|album|playlist|episode):([a-zA-Z0-9]+)$/i);
+  if (uriMatch) return `https://open.spotify.com/${uriMatch[1]}/${uriMatch[2]}`;
+  return null;
+}
+
+const SPOTIFY_ICON = <span style={{ fontSize:10 }}>🎵</span>;
 
 let gZ = 20;
 
@@ -328,66 +299,64 @@ function Spinner() {
   );
 }
 
-// ── Spotify Search component ─────────────────────────────────────────────────
+// ── Spotify input component ─────────────────────────────────────────────────
 
 function SpotifySearch({ col, onSelect, initialSelected }) {
-  const [query,       setQuery]       = useState("");
-  const [results,     setResults]     = useState([]);
-  const [searching,   setSearching]   = useState(false);
-  const [selected,    setSelected]    = useState(initialSelected || null);
-  const [errorMsg,    setErrorMsg]    = useState("");
-  const debounceRef = useRef(null);
+  const [input, setInput] = useState("");
+  const [selectedUrl, setSelectedUrl] = useState(initialSelected || "");
+  const [selectedMeta, setSelectedMeta] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const search = useCallback(async (q) => {
-    if (!q.trim()) { setResults([]); return; }
-    setSearching(true);
-    setErrorMsg("");
-    try {
-      const token = await getSpotifyToken();
-      if (!token) {
-        setErrorMsg("Spotify unavailable — paste a link instead");
-        setSearching(false);
-        return;
-      }
-      const r = await fetch(
-        `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=5`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!r.ok) { setResults([]); setSearching(false); return; }
-      const d = await r.json();
-      setResults(d.tracks?.items || []);
-    } catch {
-      setResults([]);
-      setErrorMsg("Search failed — check your connection");
+  const validateLink = useCallback(async (value) => {
+    const url = normalizeSpotifyUrl(value);
+    if (!url) {
+      setSelectedUrl("");
+      setSelectedMeta(null);
+      setErrorMsg(value.trim() ? "Paste a Spotify track, album, playlist, or episode URL." : "");
+      onSelect("", null);
+      return false;
     }
-    setSearching(false);
-  }, []);
 
-  const handleChange = (e) => {
-    const q = e.target.value;
-    setQuery(q);
     setErrorMsg("");
-    clearTimeout(debounceRef.current);
-    if (!q.trim()) { setResults([]); return; }
-    debounceRef.current = setTimeout(() => search(q), 420);
+    setLoading(true);
+
+    try {
+      const response = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`);
+      if (!response.ok) throw new Error("invalid spotify link");
+      const data = await response.json();
+      const meta = { title: data.title, cover: data.thumbnail_url };
+      setSelectedUrl(url);
+      setSelectedMeta(meta);
+      setInput(url);
+      onSelect(url, meta);
+      return true;
+    } catch {
+      setSelectedUrl("");
+      setSelectedMeta(null);
+      setErrorMsg("Unable to verify the Spotify link. Paste the full open.spotify.com URL.");
+      onSelect("", null);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [onSelect]);
+
+  const handleInputChange = (e) => {
+    setInput(e.target.value);
+    setErrorMsg("");
   };
 
-  const pick = (track) => {
-    const url = `https://open.spotify.com/track/${track.id}`;
-    const trackMeta = {
-      title: `${track.name} — ${track.artists.map(a => a.name).join(", ")}`,
-      cover: track.album.images[2]?.url || track.album.images[0]?.url,
-    };
-    setSelected({ track, meta: trackMeta, url });
-    setQuery("");
-    setResults([]);
-    onSelect(url, trackMeta);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await validateLink(input);
   };
 
-  const clear = () => {
-    setSelected(null);
-    setQuery("");
-    setResults([]);
+  const handleClear = () => {
+    setInput("");
+    setSelectedUrl("");
+    setSelectedMeta(null);
+    setErrorMsg("");
     onSelect("", null);
   };
 
@@ -397,87 +366,52 @@ function SpotifySearch({ col, onSelect, initialSelected }) {
         🎵 Add a song (optional)
       </label>
 
-      {selected ? (
-        /* ── Selected state ── */
-        <div style={{ display:"flex",alignItems:"center",gap:8,background:"rgba(0,0,0,0.09)",borderRadius:10,padding:"8px 10px" }}>
-          {selected.track.album.images[2]?.url && (
-            <img
-              src={selected.track.album.images[2].url}
-              alt=""
-              style={{ width:36,height:36,borderRadius:5,objectFit:"cover",flexShrink:0 }}
-            />
+      {selectedUrl ? (
+        <div style={{ display:"flex",alignItems:"center",gap:10,background:"rgba(0,0,0,0.09)",borderRadius:10,padding:"10px 12px" }}>
+          {selectedMeta?.cover ? (
+            <img src={selectedMeta.cover} alt="" style={{ width:36,height:36,borderRadius:6,objectFit:"cover",flexShrink:0 }} />
+          ) : (
+            <div style={{ width:36,height:36,borderRadius:6,background:"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <span style={{ fontSize:18,color:col.text }}>🎵</span>
+            </div>
           )}
           <div style={{ flex:1,overflow:"hidden" }}>
             <div style={{ fontSize:12.5,color:col.text,fontFamily:"sans-serif",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
-              {selected.track.name}
+              {selectedMeta?.title || "Spotify link added"}
             </div>
             <div style={{ fontSize:10.5,color:col.text,opacity:0.6,fontFamily:"sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
-              {selected.track.artists.map(a => a.name).join(", ")} · {selected.track.album.name}
+              {selectedUrl}
             </div>
           </div>
           <button
-            onClick={clear}
-            style={{ background:"rgba(0,0,0,0.12)",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",fontSize:14,color:col.text,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1 }}
+            onClick={handleClear}
+            type="button"
+            style={{ background:"rgba(0,0,0,0.12)",border:"none",borderRadius:"50%",width:26,height:26,cursor:"pointer",fontSize:14,color:col.text,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1 }}
           >×</button>
         </div>
       ) : (
-        /* ── Search state ── */
-        <div style={{ position:"relative" }}>
-          <div style={{ position:"relative" }}>
-            <input
-              value={query}
-              onChange={handleChange}
-              placeholder="search for a song or artist..."
-              style={{ width:"100%",background:"rgba(0,0,0,0.09)",border:"none",borderRadius:8,padding:"10px 36px 10px 11px",fontSize:16,fontFamily:"sans-serif",color:col.text,outline:"none",boxSizing:"border-box" }}
-            />
-            {/* Spotify icon or spinner inside input */}
-            <div style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",display:"flex",alignItems:"center",justifyContent:"center" }}>
-              {searching
-                ? <div style={{ width:14,height:14,border:`1.5px solid ${col.text}40`,borderTop:`1.5px solid ${col.text}aa`,borderRadius:"50%",animation:"spin 0.7s linear infinite" }} />
-                : <div style={{ width:18,height:18,borderRadius:3,background:"#1DB954",display:"flex",alignItems:"center",justifyContent:"center" }}>{SPOTIFY_ICON}</div>
-              }
-            </div>
-          </div>
+        <form onSubmit={handleSubmit} style={{ position:"relative" }}>
+          <input
+            value={input}
+            onChange={handleInputChange}
+            placeholder="Paste Spotify link here..."
+            style={{ width:"100%",background:"rgba(0,0,0,0.09)",border:"none",borderRadius:8,padding:"10px 100px 10px 12px",fontSize:16,fontFamily:"sans-serif",color:col.text,outline:"none",boxSizing:"border-box" }}
+          />
+          <button
+            type="submit"
+            style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",padding:"8px 12px",borderRadius:8,border:"none",background:col.shadow,color:"#fff",fontSize:12,cursor:input.trim() ? "pointer" : "not-allowed",opacity:input.trim() ? 1 : 0.5 }}
+            disabled={!input.trim()}
+          >
+            {loading ? "checking…" : "add"}
+          </button>
+        </form>
+      )}
 
-          {errorMsg && (
-            <p style={{ margin:"5px 0 0",fontSize:10.5,color:col.text,opacity:0.5,fontFamily:"sans-serif" }}>{errorMsg}</p>
-          )}
-
-          {/* Results dropdown */}
-          {results.length > 0 && (
-            <div style={{ position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:col.bg,borderRadius:11,boxShadow:"0 8px 32px rgba(0,0,0,0.32)",zIndex:999,overflow:"hidden",border:`1px solid ${col.shadow}25` }}>
-              {results.map((track, idx) => (
-                <button
-                  key={track.id}
-                  onClick={() => pick(track)}
-                  style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"transparent",border:"none",borderBottom:idx < results.length - 1 ? `1px solid ${col.shadow}18` : "none",cursor:"pointer",textAlign:"left",WebkitTapHighlightColor:"transparent" }}
-                >
-                  <img
-                    src={track.album.images[2]?.url || track.album.images[0]?.url}
-                    alt=""
-                    style={{ width:38,height:38,borderRadius:5,objectFit:"cover",flexShrink:0 }}
-                  />
-                  <div style={{ overflow:"hidden",flex:1 }}>
-                    <div style={{ fontSize:13,color:col.text,fontFamily:"sans-serif",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
-                      {track.name}
-                    </div>
-                    <div style={{ fontSize:10.5,color:col.text,opacity:0.6,fontFamily:"sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
-                      {track.artists.map(a => a.name).join(", ")} · {track.album.name}
-                    </div>
-                  </div>
-                  <div style={{ fontSize:10,color:col.text,opacity:0.35,fontFamily:"sans-serif",flexShrink:0 }}>
-                    {Math.floor(track.duration_ms / 60000)}:{String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2,"0")}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* No results */}
-          {!searching && query.trim() && results.length === 0 && !errorMsg && (
-            <p style={{ margin:"5px 0 0",fontSize:10.5,color:col.text,opacity:0.45,fontFamily:"sans-serif" }}>no tracks found — try a different search</p>
-          )}
-        </div>
+      {errorMsg && (
+        <p style={{ margin:"8px 0 0",fontSize:10.5,color:col.text,opacity:0.6,fontFamily:"sans-serif" }}>{errorMsg}</p>
+      )}
+      {!errorMsg && !selectedUrl && (
+        <p style={{ margin:"8px 0 0",fontSize:10.5,color:col.text,opacity:0.45,fontFamily:"sans-serif" }}>Supported Spotify URLs: track, album, playlist, episode.</p>
       )}
     </div>
   );
@@ -728,7 +662,9 @@ export default function UnsentWall() {
   const [saveStatus, setSaveStatus] = useState("idle");
   const [mobileTab,  setMobileTab]  = useState("wall");
   const [desktopTab, setDesktopTab] = useState("wall");
+  const [showWelcome, setShowWelcome] = useState(false);
   const [zoom,       setZoom]       = useState(1);
+  const welcomeSeenKey = "unsentWallWelcomeSeen";
 
   const wallRef   = useRef(null);
   const textRef   = useRef(null);
@@ -750,6 +686,14 @@ export default function UnsentWall() {
       }
       setLoading(false);
     })();
+
+    try {
+      const seen = window.localStorage.getItem(welcomeSeenKey);
+      if (!seen) {
+        setShowWelcome(true);
+        window.localStorage.setItem(welcomeSeenKey, "1");
+      }
+    } catch {}
   }, []);
 
   // ── Spotify oEmbed metadata (for notes loaded from DB that only have a URL) ─
@@ -984,6 +928,7 @@ export default function UnsentWall() {
         </div>
 
         {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
+        {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
 
         {/* Compose sheet — MOBILE */}
         {composing && (
@@ -1114,6 +1059,7 @@ export default function UnsentWall() {
       </div>
 
       {showBgPick && <EmotionBgPicker current={bg} onChange={changeBg} onClose={() => setShowBgPick(false)} />}
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
 
       {/* Compose modal — DESKTOP */}
       {composing && (
