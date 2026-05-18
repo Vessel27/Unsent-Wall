@@ -138,6 +138,24 @@ function EmotionButton({ bg, small, onOpen }) {
   );
 }
 
+function ZoomControls({ zoom, onZoomOut, onZoomIn }) {
+  return (
+    <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+      <button
+        onClick={onZoomOut}
+        style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }}
+        type="button"
+      >−</button>
+      <span style={{ minWidth:44,textAlign:"center",fontSize:12,color:"rgba(255,255,255,0.85)",fontFamily:"sans-serif" }}>{Math.round(zoom * 100)}%</span>
+      <button
+        onClick={onZoomIn}
+        style={{ width:32,height:32,borderRadius:10,border:"1px solid rgba(255,255,255,0.24)",background:"rgba(255,255,255,0.08)",color:"#fff",fontSize:18,cursor:"pointer" }}
+        type="button"
+      >+</button>
+    </div>
+  );
+}
+
 const SPOTIFY_ICON = (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="white">
     <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
@@ -275,7 +293,7 @@ function EmotionBgPicker({ current, onChange, onClose }) {
 
 // ── Draggable sticky note ─────────────────────────────────────────────────────
 
-function StickyNote({ note, meta, onDragEnd, onTap, wallRef }) {
+function StickyNote({ note, meta, onDragEnd, onTap, wallRef, zoom }) {
   const c        = STICKY_COLORS[note.colorIdx];
   const m        = meta[note.spotifyUrl];
   const posRef   = useRef({ x: note.x, y: note.y });
@@ -341,8 +359,9 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef }) {
     startRef.current = { x: clientX, y: clientY };
 
     const rect = wallRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
-    const ox   = clientX - rect.left - posRef.current.x;
-    const oy   = clientY - rect.top  - posRef.current.y;
+    const scale = zoom || 1;
+    const ox   = clientX - rect.left - posRef.current.x * scale;
+    const oy   = clientY - rect.top  - posRef.current.y * scale;
     lastRef.current = { x: clientX, y: clientY, t: Date.now() };
     applyTransform(posRef.current.x, posRef.current.y, true, false);
 
@@ -359,8 +378,9 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef }) {
       velRef.current  = { x: (cx - lastRef.current.x) / dt * 16, y: (cy - lastRef.current.y) / dt * 16 };
       lastRef.current = { x: cx, y: cy, t: now };
       const wallRect  = wallRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
-      let nx = cx - wallRect.left - ox;
-      let ny = cy - wallRect.top  - oy;
+      const scale     = zoom || 1;
+      let nx = (cx - wallRect.left - ox) / scale;
+      let ny = (cy - wallRect.top  - oy) / scale;
       if (wallRef.current) {
         nx = Math.max(0, Math.min(nx, wallRef.current.offsetWidth  - noteW));
         ny = Math.max(0, Math.min(ny, wallRef.current.offsetHeight - 220));
@@ -390,7 +410,7 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef }) {
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup",   onUp);
     }
-  }, [applyTransform, momentum, note, onDragEnd, onTap, wallRef]);
+  }, [applyTransform, momentum, note, onDragEnd, onTap, wallRef, zoom]);
 
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
 
@@ -399,6 +419,7 @@ function StickyNote({ note, meta, onDragEnd, onTap, wallRef }) {
   return (
     <div
       ref={elRef}
+      className="sticky-note"
       onPointerDown={onPointerDown}
       onTouchStart={onPointerDown}
       style={{
@@ -443,10 +464,17 @@ export default function UnsentWall() {
   const [meta,       setMeta]       = useState({});
   const [saveStatus, setSaveStatus] = useState("idle");
   const [mobileTab,  setMobileTab]  = useState("wall");
+  const [zoom,       setZoom]       = useState(1);
 
   const wallRef   = useRef(null);
+  const pinchRef  = useRef({ active:false, startDist:0, startZoom:1 });
   const textRef   = useRef(null);
   const saveTimer = useRef(null);
+
+  const getTouchDistance = (touches) => {
+    const [a,b] = touches;
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  };
 
   // ── Load from Firestore on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -512,6 +540,25 @@ export default function UnsentWall() {
 
   const changeBg = useCallback((newBg) => { setBg(newBg); saveBg(newBg); }, []);
 
+  const handlePinchStart = useCallback((e) => {
+    if (!mobile || e.touches.length !== 2) return;
+    if (Array.from(e.touches).some(t => t.target.closest(".sticky-note"))) return;
+    const dist = getTouchDistance(e.touches);
+    pinchRef.current = { active:true, startDist:dist, startZoom:zoom };
+    e.preventDefault();
+  }, [mobile, zoom]);
+
+  const handlePinchMove = useCallback((e) => {
+    if (!mobile || !pinchRef.current.active || e.touches.length !== 2) return;
+    const dist = getTouchDistance(e.touches);
+    setZoom(clampZoom(pinchRef.current.startZoom * (dist / pinchRef.current.startDist)));
+    e.preventDefault();
+  }, [mobile]);
+
+  const handlePinchEnd = useCallback(() => {
+    pinchRef.current.active = false;
+  }, []);
+
   const post = () => {
     if (!draft.text.trim()) return;
     gZ++;
@@ -527,6 +574,8 @@ export default function UnsentWall() {
     setComposing(false);
   };
 
+  const clampZoom = (value) => Math.min(1.4, Math.max(0.72, value));
+  const zoomStep  = 0.14;
   const onSpotify = url => { setDraft(d => ({ ...d, url })); fetchMeta(url); };
 
   const col       = STICKY_COLORS[draft.colorIdx];
@@ -539,7 +588,11 @@ export default function UnsentWall() {
   const WallCanvas = () => (
     <div
       ref={wallRef}
-      style={{ position:"relative", width:WALL_W, height:WALL_H, ...wallStyle, touchAction:"pan-x pan-y" }}
+      onTouchStart={handlePinchStart}
+      onTouchMove={handlePinchMove}
+      onTouchEnd={handlePinchEnd}
+      onTouchCancel={handlePinchEnd}
+      style={{ position:"relative", width:WALL_W, height:WALL_H, ...wallStyle, touchAction:"pan-x pan-y", transform:`scale(${zoom})`, transformOrigin:"top left" }}
     >
       {loading && <Spinner />}
       {!loading && notes.length === 0 && (
@@ -549,7 +602,7 @@ export default function UnsentWall() {
         </div>
       )}
       {!loading && notes.map(n => (
-        <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} />
+        <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} zoom={zoom} />
       ))}
     </div>
   );
@@ -571,7 +624,7 @@ export default function UnsentWall() {
               </div>
               <SaveDot status={saveStatus} />
             </div>
-            <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
               <EmotionButton bg={bg} onOpen={() => setShowBgPick(true)} small />
               <button
                 onClick={() => { setComposing(true); setTimeout(() => textRef.current?.focus(), 80); }}
@@ -715,6 +768,7 @@ export default function UnsentWall() {
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             <span style={{ fontSize:11,color:"rgba(255,255,255,0.35)",fontFamily:"sans-serif" }}>{notes.length} notes</span>
             <EmotionButton bg={bg} onOpen={() => setShowBgPick(true)} />
+            <ZoomControls zoom={zoom} onZoomOut={() => setZoom(z => clampZoom(z - zoomStep))} onZoomIn={() => setZoom(z => clampZoom(z + zoomStep))} />
             <button
               onClick={() => { setComposing(true); setTimeout(() => textRef.current?.focus(), 60); }}
               style={{ background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",padding:tablet?"7px 15px":"7px 18px",borderRadius:999,fontSize:tablet?12:13,cursor:"pointer",fontFamily:"sans-serif",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",gap:5 }}
@@ -726,7 +780,7 @@ export default function UnsentWall() {
 
         {/* Wall */}
         <div style={{ flex:1,overflow:"auto" }}>
-          <div ref={wallRef} style={{ position:"relative",width:WALL_W,height:WALL_H,...wallStyle }}>
+          <div ref={wallRef} style={{ position:"relative",width:WALL_W,height:WALL_H,...wallStyle,transform:`scale(${zoom})`,transformOrigin:"top left" }}>
             {loading && <Spinner />}
             {!loading && notes.length === 0 && (
               <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none" }}>
@@ -735,7 +789,7 @@ export default function UnsentWall() {
               </div>
             )}
             {!loading && notes.map(n => (
-              <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} />
+              <StickyNote key={n.id} note={n} meta={meta} onDragEnd={handleDragEnd} onTap={handleTap} wallRef={wallRef} zoom={zoom} />
             ))}
           </div>
         </div>
