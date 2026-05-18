@@ -1,38 +1,103 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { db } from "./firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc
+} from "firebase/firestore";
 
 // ── Firebase storage functions ───────────────────────────────────────────────
 
 async function loadNotes() {
   try {
-    const snap = await getDoc(doc(db, "wall", "notes"));
-    if (snap.exists()) {
-      const data = snap.data();
-      if (Array.isArray(data.items) && data.items.length > 0) return data.items;
-    }
-  } catch (e) { console.error("loadNotes:", e); }
-  return null;
+    const q = query(
+      collection(db, "wallNotes"),
+      orderBy("createdAt", "desc")
+    );
+
+    const snap = await getDocs(q);
+
+    return snap.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    }));
+
+  } catch (e) {
+    console.error("loadNotes:", e);
+    return [];
+  }
 }
 
-async function saveNotes(notes) {
+async function saveNote(note) {
   try {
-    await setDoc(doc(db, "wall", "notes"), { items: notes });
-  } catch (e) { console.error("saveNotes:", e); }
+    const ref = await addDoc(
+      collection(db, "wallNotes"),
+      note
+    );
+
+    return ref.id;
+
+  } catch (e) {
+    console.error("saveNote:", e);
+    return null;
+  }
 }
+
+async function updateNotePosition(id, x, y, zIndex) {
+  try {
+    await updateDoc(
+      doc(db, "wallNotes", id),
+      {
+        x,
+        y,
+        zIndex
+      }
+    );
+  } catch (e) {
+    console.error("updateNotePosition:", e);
+  }
+}
+
+
+// ─────────────────────────────────────────────
+// BACKGROUND
+// ─────────────────────────────────────────────
 
 async function loadBg() {
   try {
-    const snap = await getDoc(doc(db, "wall", "bg"));
-    if (snap.exists()) return snap.data().value ?? null;
-  } catch (e) { console.error("loadBg:", e); }
+    const snap = await getDoc(
+      doc(db, "wall", "bg")
+    );
+
+    if (snap.exists()) {
+      return snap.data().value ?? null;
+    }
+
+  } catch (e) {
+    console.error("loadBg:", e);
+  }
+
   return null;
 }
 
+
 async function saveBg(bg) {
   try {
-    await setDoc(doc(db, "wall", "bg"), { value: bg });
-  } catch (e) { console.error("saveBg:", e); }
+    await setDoc(
+      doc(db, "wall", "bg"),
+      {
+        value: bg
+      }
+    );
+  } catch (e) {
+    console.error("saveBg:", e);
+  }
 }
 
 // ── Spotify token cache ──────────────────────────────────────────────────────
@@ -657,7 +722,6 @@ export default function UnsentWall() {
 
   const wallRef   = useRef(null);
   const textRef   = useRef(null);
-  const saveTimer = useRef(null);
 
   // ── Load from Firestore on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -678,17 +742,6 @@ export default function UnsentWall() {
     })();
   }, []);
 
-  // ── Debounced persist to Firestore ────────────────────────────────────────
-  const persistNotes = useCallback((updated) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveStatus("saving");
-    saveTimer.current = setTimeout(async () => {
-      await saveNotes(updated);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 1600);
-    }, 800);
-  }, []);
-
   // ── Spotify oEmbed metadata (for notes loaded from DB that only have a URL) ─
   const fetchMeta = useCallback(async (url) => {
     if (!url || meta[url]) return;
@@ -702,22 +755,26 @@ export default function UnsentWall() {
 
   useEffect(() => { notes.forEach(n => n.spotifyUrl && fetchMeta(n.spotifyUrl)); }, [notes, fetchMeta]);
 
-  const updateNotes = useCallback((fn) => {
-    setNotes(prev => {
-      const next = typeof fn === "function" ? fn(prev) : fn;
-      persistNotes(next);
-      return next;
-    });
-  }, [persistNotes]);
+  const handleDragEnd = useCallback(async (id, x, y) => {
 
-  const handleDragEnd = useCallback((id, x, y) => {
     gZ++;
-    setNotes(prev => {
-      const next = prev.map(n => n.id === id ? { ...n, x, y, zIndex: gZ } : n);
-      persistNotes(next);
-      return next;
-    });
-  }, [persistNotes]);
+
+    setNotes(prev =>
+      prev.map(n =>
+        n.id === id
+          ? {
+              ...n,
+              x,
+              y,
+              zIndex: gZ
+            }
+          : n
+      )
+    );
+
+    await updateNotePosition(id, x, y, gZ);
+
+  }, []);
 
   const handleTap = useCallback((note) => { setModal(note); }, []);
 
@@ -731,18 +788,71 @@ export default function UnsentWall() {
     }
   }, []);
 
-  const post = () => {
+  const post = async () => {
+
     if (!draft.text.trim()) return;
+
     gZ++;
+
     const newNote = {
-      id: `n${Date.now()}`,
+      text: draft.text,
+      spotifyUrl: draft.url,
+      colorIdx: draft.colorIdx,
+
       x: 20 + Math.random() * (WALL_W - 220),
       y: 20 + Math.random() * (WALL_H - 320),
-      colorIdx: draft.colorIdx, zIndex: gZ,
-      text: draft.text, spotifyUrl: draft.url, createdAt: Date.now(),
+
+      zIndex: gZ,
+      createdAt: Date.now()
     };
-    updateNotes(p => [newNote, ...p]);
-    setDraft({ text:"", url:"", colorIdx:0 });
+
+    // optimistic UI
+    const tempId = `temp-${Date.now()}`;
+
+    setNotes(prev => [
+      {
+        ...newNote,
+        id: tempId
+      },
+      ...prev
+    ]);
+
+    setSaveStatus("saving");
+
+    const realId = await saveNote(newNote);
+
+    if (realId) {
+
+      setNotes(prev =>
+        prev.map(n =>
+          n.id === tempId
+            ? { ...n, id: realId }
+            : n
+        )
+      );
+
+      setSaveStatus("saved");
+
+    } else {
+
+      // rollback if failed
+      setNotes(prev =>
+        prev.filter(n => n.id !== tempId)
+      );
+
+      setSaveStatus("idle");
+    }
+
+    setTimeout(() => {
+      setSaveStatus("idle");
+    }, 1500);
+
+    setDraft({
+      text: "",
+      url: "",
+      colorIdx: 0
+    });
+
     setComposing(false);
   };
 
