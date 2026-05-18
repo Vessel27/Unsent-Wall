@@ -187,14 +187,14 @@ input,textarea{font-size:16px!important;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 `;
 
-// Force all text color to white for consistency
+// White text override scoped to welcome modal only
 const GLOBAL_OVERRIDE_CSS = `
-/* Global white text override */
-html, body, #root, * { color: #fff !important; }
-input, textarea, button, a { color: #fff !important; }
-svg { color: #fff !important; }
-/* Make selected (highlighted) text white with subtle translucent bg */
-::selection { color: #fff !important; background: rgba(255,255,255,0.12) !important; }
+/* Welcome modal white text override */
+.welcome-modal, .welcome-modal * { color: #fff !important; }
+.welcome-modal input, .welcome-modal textarea, .welcome-modal button, .welcome-modal a { color: #fff !important; }
+.welcome-modal svg { color: #fff !important; }
+/* Make selected (highlighted) text white in the welcome modal */
+.welcome-modal ::selection { color: #fff !important; background: rgba(255,255,255,0.12) !important; }
 `;
 
 function GlobalStyles({ bodyCss }) {
@@ -660,7 +660,7 @@ function WelcomeModal({ onClose, col, bg }) {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(6px)" }}
     >
-      <div style={{ width:"min(620px,92vw)",background:"linear-gradient(180deg,#0f1220,#141621)",color:"#fff",borderRadius:14,padding:20,boxShadow:"0 30px 80px rgba(0,0,0,0.6)",position:"relative" }}>
+      <div className="welcome-modal" style={{ width:"min(620px,92vw)",background:"linear-gradient(180deg,#0f1220,#141621)",color:"#fff",borderRadius:14,padding:20,boxShadow:"0 30px 80px rgba(0,0,0,0.6)",position:"relative" }}>
         <button onClick={onClose} style={{ position:"absolute",top:12,right:12,background:"rgba(255,255,255,0.06)",border:"none",width:34,height:34,borderRadius:99,cursor:"pointer",color:"#fff",fontSize:16 }}>×</button>
         <h2 style={{ margin:0,fontSize:18,fontWeight:800,fontFamily:"Georgia,serif",color: (col?.text) || (bg?.config?.accent) || "#fff",textShadow:"0 2px 8px rgba(0,0,0,0.6)" }}>Unsent Wall</h2>
         <p style={{ margin:"8px 0 0",fontSize:13.5,color:"rgba(255,255,255,0.95)",lineHeight:1.5,fontFamily:"sans-serif" }}>
