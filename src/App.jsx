@@ -467,7 +467,7 @@ export default function UnsentWall() {
   const [zoom,       setZoom]       = useState(1);
 
   const wallRef   = useRef(null);
-  const pinchRef  = useRef({ active:false, startDist:0, startZoom:1 });
+  const pinchRef  = useRef({ active:false, startDist:0, startZoom:1, currentZoom:1 });
   const textRef   = useRef(null);
   const saveTimer = useRef(null);
 
@@ -544,18 +544,26 @@ export default function UnsentWall() {
     if (!mobile || e.touches.length !== 2) return;
     if (Array.from(e.touches).some(t => t.target.closest(".sticky-note"))) return;
     const dist = getTouchDistance(e.touches);
-    pinchRef.current = { active:true, startDist:dist, startZoom:zoom };
+    pinchRef.current.active = true;
+    pinchRef.current.startDist = dist;
+    pinchRef.current.startZoom = zoom;
+    pinchRef.current.currentZoom = zoom;
     e.preventDefault();
   }, [mobile, zoom]);
 
   const handlePinchMove = useCallback((e) => {
     if (!mobile || !pinchRef.current.active || e.touches.length !== 2) return;
     const dist = getTouchDistance(e.touches);
-    setZoom(clampZoom(pinchRef.current.startZoom * (dist / pinchRef.current.startDist)));
+    const nextZoom = clampZoom(pinchRef.current.startZoom * (dist / pinchRef.current.startDist));
+    pinchRef.current.currentZoom = nextZoom;
+    if (wallRef.current) wallRef.current.style.transform = `scale(${nextZoom})`;
     e.preventDefault();
   }, [mobile]);
 
   const handlePinchEnd = useCallback(() => {
+    if (pinchRef.current.active) {
+      setZoom(pinchRef.current.currentZoom);
+    }
     pinchRef.current.active = false;
   }, []);
 
@@ -592,7 +600,7 @@ export default function UnsentWall() {
       onTouchMove={handlePinchMove}
       onTouchEnd={handlePinchEnd}
       onTouchCancel={handlePinchEnd}
-      style={{ position:"relative", width:WALL_W, height:WALL_H, ...wallStyle, touchAction:"pan-x pan-y", transform:`scale(${zoom})`, transformOrigin:"top left" }}
+      style={{ position:"relative", width:WALL_W, height:WALL_H, ...wallStyle, touchAction:"none", transform:`scale(${zoom})`, transformOrigin:"top left", willChange:"transform" }}
     >
       {loading && <Spinner />}
       {!loading && notes.length === 0 && (
