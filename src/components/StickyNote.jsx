@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { STICKY_COLORS } from "../lib/wallThemes";
 import { FontAwesomeIcon, faMusic } from "../lib/faIcons";
+import ShareButton from "./ShareButton";
 
 function Tape() {
   return (
@@ -166,6 +167,7 @@ export default function StickyNote({ note, meta, onDragEnd, onTap, onReactNote, 
 
   return (
     <div
+      id={`note-${note.id}`}
       ref={elRef}
       className="sticky-note"
       onPointerDown={onPointerDown}
@@ -197,7 +199,8 @@ export default function StickyNote({ note, meta, onDragEnd, onTap, onReactNote, 
         </p>
         {note.spotifyUrl && <SpotifyChip cover={spotifyMeta?.cover} title={spotifyMeta?.title} col={color} />}
       </div>
-      <div style={{ padding: "0 12px 10px", display: "flex", justifyContent: "flex-end", position: "relative" }}>
+      <div style={{ padding: "0 12px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "relative" }}>
+        <ShareButton noteId={note.id} noteText={note.text} />
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onReactNote?.(note.id); }}
