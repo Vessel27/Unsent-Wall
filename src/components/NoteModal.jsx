@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { STICKY_COLORS, getEmbedUrl } from "../lib/wallThemes";
 import { formatRelativeTime } from "../lib/timeUtils";
 import { FontAwesomeIcon, faTimes } from "../lib/faIcons";
+import ShareButton from "./ShareButton";
 
 export default function NoteModal({ modal, onClose, variant, tablet, onAddComment, onReactComment, onReactNote, userReactions }) {
   const isMobile = variant === "mobile";
@@ -59,7 +60,7 @@ export default function NoteModal({ modal, onClose, variant, tablet, onAddCommen
           <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.85, color: mc.text, fontFamily: "Georgia,serif", whiteSpace: "pre-wrap" }}>{modal.text}</p>
         </div>
 
-        {/* Heart reaction for the note */}
+        {/* Heart + Share row */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <button
             type="button"
@@ -84,6 +85,7 @@ export default function NoteModal({ modal, onClose, variant, tablet, onAddCommen
               {heartCount > 0 ? heartCount : ""}
             </span>
           </button>
+          <ShareButton noteId={modal.id} noteText={modal.text} />
         </div>
 
         {/* Spotify embed */}

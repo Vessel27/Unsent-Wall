@@ -50,11 +50,33 @@ export default function UnsentWall() {
   const wallRef = useRef(null);
   const textRef = useRef(null);
 
+  //Share Function
+  setTimeout(() => {
+    const el = document.getElementById(`note-${noteId}`);
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // visual focus (safe with your transform system)
+    el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
+    el.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.25)";
+    el.style.transform = "scale(1.08)";
+
+    setTimeout(() => {
+      el.style.transform = "";
+      el.style.boxShadow = "";
+    }, 600);
+
+    setTimeout(() => {
+      setModal(target);
+    }, 200);
+  }, 300);
+
   // Persist liked state across page refreshes
   useEffect(() => {
     try {
       window.localStorage.setItem("unsentWallUserReactions", JSON.stringify(userReactions));
-    } catch {}
+    } catch { }
   }, [userReactions]);
 
   useEffect(() => {
@@ -82,7 +104,7 @@ export default function UnsentWall() {
         setShowWelcome(true);
         window.localStorage.setItem(welcomeSeenKey, "1");
       }
-    } catch {}
+    } catch { }
   }, []);
 
   const fetchMeta = useCallback(async (url) => {
@@ -92,7 +114,7 @@ export default function UnsentWall() {
       if (!response.ok) return;
       const data = await response.json();
       setMeta(p => ({ ...p, [url]: { title: data.title, cover: data.thumbnail_url } }));
-    } catch {}
+    } catch { }
   }, [meta]);
 
   useEffect(() => {
