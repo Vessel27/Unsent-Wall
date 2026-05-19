@@ -54,33 +54,39 @@ export default function UnsentWall() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const noteId = params.get("note");
-    if (!noteId || loading) return;
+    if (!noteId) return;
 
     let attempts = 0;
+    let cancelled = false;
 
     const tryScroll = () => {
+      if (cancelled) return;
+
       const el = document.getElementById(`note-${noteId}`);
 
       if (!el) {
-        if (attempts++ < 15) {
-          setTimeout(tryScroll, 300);
+        if (attempts++ < 30) {
+          setTimeout(tryScroll, 200);
         }
         return;
       }
 
-      // Scroll the wall container so the note is centred in the viewport
-      const wallContainer = wallRef.current?.parentElement;
+      const wallContainer = wallRef.current;
+
       if (wallContainer) {
-        wallContainer.scrollTo({
-          left: el.offsetLeft - wallContainer.clientWidth / 2 + 87,
-          top: el.offsetTop - wallContainer.clientHeight / 2 + 110,
-          behavior: "smooth",
+        requestAnimationFrame(() => {
+          wallContainer.scrollTo({
+            left: el.offsetLeft - wallContainer.clientWidth / 2 + 87,
+            top: el.offsetTop - wallContainer.clientHeight / 2 + 110,
+            behavior: "smooth",
+          });
         });
       }
 
-      // Highlight pulse
+      // highlight effect
       el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
       el.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.55)";
+
       const base = el.style.transform || "";
       el.style.transform = base + " scale(1.12)";
 
@@ -90,7 +96,12 @@ export default function UnsentWall() {
       }, 800);
     };
 
-    setTimeout(tryScroll, 300);
+    const timeout = setTimeout(tryScroll, 600);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, [loading, notes]);
 
   // Persist liked state across page refreshes
@@ -338,7 +349,7 @@ export default function UnsentWall() {
 
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
             {mobileTab === "wall" ? (
-              <div style={{ height: "100%", overflow: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+              <div ref={wallRef} style={{ height: "100%", overflow: "auto" }}>
                 <WallCanvas
                   wallRef={wallRef}
                   wallStyle={wallStyle}
@@ -425,7 +436,7 @@ export default function UnsentWall() {
           </div>
 
           {desktopTab === "wall" ? (
-            <div style={{ flex: 1, overflow: "auto" }}>
+            <div ref={wallRef} style={{ flex: 1, overflow: "auto" }}>
               <WallCanvas
                 wallRef={wallRef}
                 wallStyle={wallStyle}
