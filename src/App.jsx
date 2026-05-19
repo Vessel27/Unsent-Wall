@@ -50,33 +50,47 @@ export default function UnsentWall() {
   const wallRef = useRef(null);
   const textRef = useRef(null);
 
-  //Share Function
+  // Share Function — retry loop so the note element is guaranteed to exist
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const noteId = params.get("note");
+    if (!noteId || loading) return;
 
-    if (!noteId) return;
+    let attempts = 0;
 
-    const scrollToNote = () => {
+    const tryScroll = () => {
       const el = document.getElementById(`note-${noteId}`);
-      if (!el) return;
 
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (!el) {
+        if (attempts++ < 15) {
+          setTimeout(tryScroll, 300);
+        }
+        return;
+      }
 
+      // Scroll the wall container so the note is centred in the viewport
+      const wallContainer = wallRef.current?.parentElement;
+      if (wallContainer) {
+        wallContainer.scrollTo({
+          left: el.offsetLeft - wallContainer.clientWidth / 2 + 87,
+          top: el.offsetTop - wallContainer.clientHeight / 2 + 110,
+          behavior: "smooth",
+        });
+      }
+
+      // Highlight pulse
       el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
-      el.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.25)";
-      el.style.transform = "scale(1.08)";
+      el.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.55)";
+      const base = el.style.transform || "";
+      el.style.transform = base + " scale(1.12)";
 
       setTimeout(() => {
-        el.style.transform = "";
         el.style.boxShadow = "";
-      }, 600);
+        el.style.transform = base;
+      }, 800);
     };
 
-    // wait for notes to load
-    if (!loading) {
-      setTimeout(scrollToNote, 300);
-    }
+    setTimeout(tryScroll, 300);
   }, [loading, notes]);
 
   // Persist liked state across page refreshes
@@ -169,12 +183,10 @@ export default function UnsentWall() {
   const handleReactNote = useCallback(async (noteId) => {
     const emoji = "❤️";
 
-    // Read the current liked state from the functional updater to avoid stale closure
     setUserReactions(prevUserReactions => {
       const isLiked = prevUserReactions[noteId] === emoji;
       const delta = isLiked ? -1 : 1;
 
-      // Update local notes state optimistically
       setNotes(prevNotes => prevNotes.map(n => {
         if (n.id !== noteId) return n;
         const current = n.reactions?.["❤️"] ?? 0;
@@ -182,7 +194,6 @@ export default function UnsentWall() {
         return { ...n, reactions: { ...n.reactions, "❤️": next } };
       }));
 
-      // Update modal if open
       setModal(prev => {
         if (!prev || prev.id !== noteId) return prev;
         const current = prev.reactions?.["❤️"] ?? 0;
@@ -190,12 +201,10 @@ export default function UnsentWall() {
         return { ...prev, reactions: { ...prev.reactions, "❤️": next } };
       });
 
-      // Persist atomically to Firestore (no stale read-modify-write)
       if (!noteId.startsWith("temp-")) {
         incrementNoteHeart(noteId, delta);
       }
 
-      // Return updated userReactions
       if (isLiked) {
         const next = { ...prevUserReactions };
         delete next[noteId];
@@ -219,12 +228,10 @@ export default function UnsentWall() {
       const current = c.reactions || {};
 
       if (userReactionEmoji === emoji) {
-        // User already reacted with this emoji, remove it (toggle off)
         const updated = { ...current };
         delete updated[emoji];
         return { ...c, reactions: updated };
       } else {
-        // User reacting with a different emoji, replace previous reaction
         const updated = current;
         if (userReactionEmoji) {
           delete updated[userReactionEmoji];
@@ -234,7 +241,6 @@ export default function UnsentWall() {
       }
     });
 
-    // Update user reactions tracker
     const newUserReactions = { ...userReactions };
     if (userReactionEmoji === emoji) {
       delete newUserReactions[reactionKey];
@@ -305,7 +311,7 @@ export default function UnsentWall() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div>
                 <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.3px", lineHeight: 1, fontFamily: "Georgia,serif", textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
-                <p style={{ margin: "1px 0 0", fontSize: 9, color: "rgba(255,255,255,0.32)", letterSpacing: "1.3px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous � open</p>
+                <p style={{ margin: "1px 0 0", fontSize: 9, color: "rgba(255,255,255,0.32)", letterSpacing: "1.3px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous · open</p>
               </div>
               <SaveDot status={saveStatus} />
             </div>
@@ -357,7 +363,7 @@ export default function UnsentWall() {
             <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 50 }}>
               <div style={{ background: "rgba(0,0,0,0.4)", border: `1px solid ${bg?.config?.accent || "rgba(255,255,255,0.1)"}30`, borderRadius: 999, padding: "4px 12px", backdropFilter: "blur(8px)" }}>
                 <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>
-                  {mobileTab === "wall" ? "drag notes � tap and hold to read" : `${notes.length} notes`}
+                  {mobileTab === "wall" ? "drag notes · tap to read" : `${notes.length} notes`}
                 </span>
               </div>
             </div>
@@ -392,7 +398,7 @@ export default function UnsentWall() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div>
               <h1 style={{ margin: 0, fontSize: tablet ? 18 : 20, fontWeight: 800, color: "#fff", letterSpacing: "-0.4px", lineHeight: 1, fontFamily: "Georgia,serif", textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
-              <p style={{ margin: "1px 0 0", fontSize: 9.5, color: "rgba(255,255,255,0.32)", letterSpacing: "1.8px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous � public � open</p>
+              <p style={{ margin: "1px 0 0", fontSize: 9.5, color: "rgba(255,255,255,0.32)", letterSpacing: "1.8px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous · public · open</p>
             </div>
             <SaveDot status={saveStatus} />
           </div>
@@ -443,7 +449,7 @@ export default function UnsentWall() {
         {!loading && (
           <div style={{ position: "absolute", bottom: 16, right: 16, background: "rgba(0,0,0,0.38)", border: `1px solid ${bg?.config?.accent || "rgba(255,255,255,0.1)"}30`, borderRadius: 999, padding: "4px 14px", backdropFilter: "blur(8px)", zIndex: 50, display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 13 }}>{bg?.emoji}</span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>feeling {bg?.label?.toLowerCase()} � {notes.length} notes</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>feeling {bg?.label?.toLowerCase()} · {notes.length} notes</span>
           </div>
         )}
       </div>
