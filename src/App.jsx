@@ -51,26 +51,33 @@ export default function UnsentWall() {
   const textRef = useRef(null);
 
   //Share Function
-  setTimeout(() => {
-    const el = document.getElementById(`note-${noteId}`);
-    if (!el) return;
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const noteId = params.get("note");
 
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!noteId) return;
 
-    // visual focus (safe with your transform system)
-    el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
-    el.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.25)";
-    el.style.transform = "scale(1.08)";
+    const scrollToNote = () => {
+      const el = document.getElementById(`note-${noteId}`);
+      if (!el) return;
 
-    setTimeout(() => {
-      el.style.transform = "";
-      el.style.boxShadow = "";
-    }, 600);
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
 
-    setTimeout(() => {
-      setModal(target);
-    }, 200);
-  }, 300);
+      el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
+      el.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.25)";
+      el.style.transform = "scale(1.08)";
+
+      setTimeout(() => {
+        el.style.transform = "";
+        el.style.boxShadow = "";
+      }, 600);
+    };
+
+    // wait for notes to load
+    if (!loading) {
+      setTimeout(scrollToNote, 300);
+    }
+  }, [loading, notes]);
 
   // Persist liked state across page refreshes
   useEffect(() => {
