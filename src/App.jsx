@@ -48,30 +48,67 @@ export default function UnsentWall() {
   });
 
   const wallRef = useRef(null);
+  const scrollRef = useRef(null);
   const textRef = useRef(null);
 
-  //Share Function
-  setTimeout(() => {
-    const el = document.getElementById(`note-${noteId}`);
-    if (!el) return;
+  // Share Function — retry loop so the note element is guaranteed to exist
+  // In UnsentWall.jsx — replace the share/scroll useEffect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const noteId = params.get("note");
+    if (!noteId) return;
 
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    let attempts = 0;
+    let cancelled = false;
 
-    // visual focus (safe with your transform system)
-    el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
-    el.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.25)";
-    el.style.transform = "scale(1.08)";
+    const tryScroll = () => {
+      if (cancelled) return;
 
-    setTimeout(() => {
-      el.style.transform = "";
-      el.style.boxShadow = "";
-    }, 600);
+      const el = document.getElementById(`note-${noteId}`);
 
-    setTimeout(() => {
-      setModal(target);
-    }, 200);
-  }, 300);
+      if (!el) {
+        if (attempts++ < 40) {          // more attempts
+          setTimeout(tryScroll, 250);
+        }
+        return;
+      }
 
+      // Use scrollRef (the outer scroll container), not wallRef
+      const wallContainer = scrollRef.current;
+
+      if (wallContainer) {
+        requestAnimationFrame(() => {
+          // el.offsetLeft/Top = position inside the scaled WallCanvas
+          // multiply by zoom to get true pixel offset inside the scroll container
+          const scaledX = el.offsetLeft * zoom;
+          const scaledY = el.offsetTop * zoom;
+
+          wallContainer.scrollTo({
+            left: scaledX - wallContainer.clientWidth / 2 + 87,
+            top: scaledY - wallContainer.clientHeight / 2 + 110,
+            behavior: "smooth",
+          });
+        });
+      }
+
+      // highlight
+      const rot = (noteId.charCodeAt(1) % 7) - 3;
+      el.style.transition = "transform 0.35s ease, box-shadow 0.35s ease";
+      el.style.boxShadow = "0 0 0 5px rgba(255,255,255,0.7), 0 0 30px rgba(255,255,255,0.3)";
+      el.style.transform = `rotate(${rot}deg) scale(1.15)`;
+
+      setTimeout(() => {
+        el.style.boxShadow = "";
+        el.style.transform = `rotate(${rot}deg) scale(1)`;
+      }, 1200);
+    };
+
+    // Wait for loading to finish first, THEN start trying
+    if (!loading) {
+      const timeout = setTimeout(tryScroll, 300);
+      return () => { cancelled = true; clearTimeout(timeout); };
+    }
+  }, [loading, notes, zoom]);   // notes in deps ensures it retries after notes populate
   // Persist liked state across page refreshes
   useEffect(() => {
     try {
@@ -162,12 +199,10 @@ export default function UnsentWall() {
   const handleReactNote = useCallback(async (noteId) => {
     const emoji = "❤️";
 
-    // Read the current liked state from the functional updater to avoid stale closure
     setUserReactions(prevUserReactions => {
       const isLiked = prevUserReactions[noteId] === emoji;
       const delta = isLiked ? -1 : 1;
 
-      // Update local notes state optimistically
       setNotes(prevNotes => prevNotes.map(n => {
         if (n.id !== noteId) return n;
         const current = n.reactions?.["❤️"] ?? 0;
@@ -175,7 +210,6 @@ export default function UnsentWall() {
         return { ...n, reactions: { ...n.reactions, "❤️": next } };
       }));
 
-      // Update modal if open
       setModal(prev => {
         if (!prev || prev.id !== noteId) return prev;
         const current = prev.reactions?.["❤️"] ?? 0;
@@ -183,12 +217,10 @@ export default function UnsentWall() {
         return { ...prev, reactions: { ...prev.reactions, "❤️": next } };
       });
 
-      // Persist atomically to Firestore (no stale read-modify-write)
       if (!noteId.startsWith("temp-")) {
         incrementNoteHeart(noteId, delta);
       }
 
-      // Return updated userReactions
       if (isLiked) {
         const next = { ...prevUserReactions };
         delete next[noteId];
@@ -212,12 +244,10 @@ export default function UnsentWall() {
       const current = c.reactions || {};
 
       if (userReactionEmoji === emoji) {
-        // User already reacted with this emoji, remove it (toggle off)
         const updated = { ...current };
         delete updated[emoji];
         return { ...c, reactions: updated };
       } else {
-        // User reacting with a different emoji, replace previous reaction
         const updated = current;
         if (userReactionEmoji) {
           delete updated[userReactionEmoji];
@@ -227,7 +257,6 @@ export default function UnsentWall() {
       }
     });
 
-    // Update user reactions tracker
     const newUserReactions = { ...userReactions };
     if (userReactionEmoji === emoji) {
       delete newUserReactions[reactionKey];
@@ -298,7 +327,7 @@ export default function UnsentWall() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div>
                 <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.3px", lineHeight: 1, fontFamily: "Georgia,serif", textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
-                <p style={{ margin: "1px 0 0", fontSize: 9, color: "rgba(255,255,255,0.32)", letterSpacing: "1.3px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous � open</p>
+                <p style={{ margin: "1px 0 0", fontSize: 9, color: "rgba(255,255,255,0.32)", letterSpacing: "1.3px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous · open</p>
               </div>
               <SaveDot status={saveStatus} />
             </div>
@@ -325,7 +354,7 @@ export default function UnsentWall() {
 
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
             {mobileTab === "wall" ? (
-              <div style={{ height: "100%", overflow: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+              <div ref={scrollRef} style={{ height: "100%", overflow: "auto" }}>
                 <WallCanvas
                   wallRef={wallRef}
                   wallStyle={wallStyle}
@@ -350,7 +379,7 @@ export default function UnsentWall() {
             <div style={{ position: "absolute", bottom: 12, left: 0, right: 0, display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 50 }}>
               <div style={{ background: "rgba(0,0,0,0.4)", border: `1px solid ${bg?.config?.accent || "rgba(255,255,255,0.1)"}30`, borderRadius: 999, padding: "4px 12px", backdropFilter: "blur(8px)" }}>
                 <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>
-                  {mobileTab === "wall" ? "drag notes � tap and hold to read" : `${notes.length} notes`}
+                  {mobileTab === "wall" ? "drag notes · tap to read" : `${notes.length} notes`}
                 </span>
               </div>
             </div>
@@ -385,7 +414,7 @@ export default function UnsentWall() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div>
               <h1 style={{ margin: 0, fontSize: tablet ? 18 : 20, fontWeight: 800, color: "#fff", letterSpacing: "-0.4px", lineHeight: 1, fontFamily: "Georgia,serif", textShadow: "0 2px 10px rgba(0,0,0,0.6)" }}>unsent wall</h1>
-              <p style={{ margin: "1px 0 0", fontSize: 9.5, color: "rgba(255,255,255,0.32)", letterSpacing: "1.8px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous � public � open</p>
+              <p style={{ margin: "1px 0 0", fontSize: 9.5, color: "rgba(255,255,255,0.32)", letterSpacing: "1.8px", textTransform: "uppercase", fontFamily: "sans-serif" }}>anonymous · public · open</p>
             </div>
             <SaveDot status={saveStatus} />
           </div>
@@ -412,7 +441,7 @@ export default function UnsentWall() {
           </div>
 
           {desktopTab === "wall" ? (
-            <div style={{ flex: 1, overflow: "auto" }}>
+            <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
               <WallCanvas
                 wallRef={wallRef}
                 wallStyle={wallStyle}
@@ -436,7 +465,7 @@ export default function UnsentWall() {
         {!loading && (
           <div style={{ position: "absolute", bottom: 16, right: 16, background: "rgba(0,0,0,0.38)", border: `1px solid ${bg?.config?.accent || "rgba(255,255,255,0.1)"}30`, borderRadius: 999, padding: "4px 14px", backdropFilter: "blur(8px)", zIndex: 50, display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 13 }}>{bg?.emoji}</span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>feeling {bg?.label?.toLowerCase()} � {notes.length} notes</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "sans-serif" }}>feeling {bg?.label?.toLowerCase()} · {notes.length} notes</span>
           </div>
         )}
       </div>
