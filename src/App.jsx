@@ -51,58 +51,66 @@ export default function UnsentWall() {
   const textRef = useRef(null);
 
   // Share Function — retry loop so the note element is guaranteed to exist
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const noteId = params.get("note");
-    if (!noteId) return;
+  // In UnsentWall.jsx — replace the share/scroll useEffect
 
-    let attempts = 0;
-    let cancelled = false;
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const noteId = params.get("note");
+  if (!noteId) return;
 
-    const tryScroll = () => {
-      if (cancelled) return;
+  let attempts = 0;
+  let cancelled = false;
 
-      const el = document.getElementById(`note-${noteId}`);
+  const tryScroll = () => {
+    if (cancelled) return;
 
-      if (!el) {
-        if (attempts++ < 30) {
-          setTimeout(tryScroll, 200);
-        }
-        return;
+    const el = document.getElementById(`note-${noteId}`);
+
+    if (!el) {
+      if (attempts++ < 30) {
+        setTimeout(tryScroll, 200);
       }
+      return;
+    }
 
-      const wallContainer = wallRef.current;
+    const wallContainer = wallRef.current;
 
-      if (wallContainer) {
-        requestAnimationFrame(() => {
-          wallContainer.scrollTo({
-            left: el.offsetLeft - wallContainer.clientWidth / 2 + 87,
-            top: el.offsetTop - wallContainer.clientHeight / 2 + 110,
-            behavior: "smooth",
-          });
+    if (wallContainer) {
+      requestAnimationFrame(() => {
+        // el.offsetLeft/Top are in the wall's coordinate space (pre-zoom).
+        // Multiply by zoom to get actual pixel position inside the scaled container,
+        // then center within the scroll viewport.
+        const scaledX = el.offsetLeft * zoom;
+        const scaledY = el.offsetTop * zoom;
+
+        wallContainer.scrollTo({
+          left: scaledX - wallContainer.clientWidth / 2 + 87,
+          top: scaledY - wallContainer.clientHeight / 2 + 110,
+          behavior: "smooth",
         });
-      }
+      });
+    }
 
-      // highlight effect
-      el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
-      el.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.55)";
+    // highlight effect
+    el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
+    el.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.55)";
 
-      const base = el.style.transform || "";
-      el.style.transform = base + " scale(1.12)";
+    const rot = (noteId.charCodeAt(1) % 7) - 3;
+    el.style.transform = `rotate(${rot}deg) scale(1.12)`;
 
-      setTimeout(() => {
-        el.style.boxShadow = "";
-        el.style.transform = base;
-      }, 800);
-    };
+    setTimeout(() => {
+      el.style.boxShadow = "";
+      el.style.transform = `rotate(${rot}deg) scale(1)`;
+    }, 800);
+  };
 
-    const timeout = setTimeout(tryScroll, 600);
+  const timeout = setTimeout(tryScroll, 600);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [loading, notes]);
+  return () => {
+    cancelled = true;
+    clearTimeout(timeout);
+  };
+}, [loading, notes, zoom]);
 
   // Persist liked state across page refreshes
   useEffect(() => {
