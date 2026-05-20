@@ -48,70 +48,67 @@ export default function UnsentWall() {
   });
 
   const wallRef = useRef(null);
+  const scrollRef = useRef(null);
   const textRef = useRef(null);
 
   // Share Function — retry loop so the note element is guaranteed to exist
   // In UnsentWall.jsx — replace the share/scroll useEffect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const noteId = params.get("note");
+    if (!noteId) return;
 
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const noteId = params.get("note");
-  if (!noteId) return;
+    let attempts = 0;
+    let cancelled = false;
 
-  let attempts = 0;
-  let cancelled = false;
+    const tryScroll = () => {
+      if (cancelled) return;
 
-  const tryScroll = () => {
-    if (cancelled) return;
+      const el = document.getElementById(`note-${noteId}`);
 
-    const el = document.getElementById(`note-${noteId}`);
-
-    if (!el) {
-      if (attempts++ < 30) {
-        setTimeout(tryScroll, 200);
+      if (!el) {
+        if (attempts++ < 40) {          // more attempts
+          setTimeout(tryScroll, 250);
+        }
+        return;
       }
-      return;
-    }
 
-    const wallContainer = wallRef.current;
+      // Use scrollRef (the outer scroll container), not wallRef
+      const wallContainer = scrollRef.current;
 
-    if (wallContainer) {
-      requestAnimationFrame(() => {
-        // el.offsetLeft/Top are in the wall's coordinate space (pre-zoom).
-        // Multiply by zoom to get actual pixel position inside the scaled container,
-        // then center within the scroll viewport.
-        const scaledX = el.offsetLeft * zoom;
-        const scaledY = el.offsetTop * zoom;
+      if (wallContainer) {
+        requestAnimationFrame(() => {
+          // el.offsetLeft/Top = position inside the scaled WallCanvas
+          // multiply by zoom to get true pixel offset inside the scroll container
+          const scaledX = el.offsetLeft * zoom;
+          const scaledY = el.offsetTop * zoom;
 
-        wallContainer.scrollTo({
-          left: scaledX - wallContainer.clientWidth / 2 + 87,
-          top: scaledY - wallContainer.clientHeight / 2 + 110,
-          behavior: "smooth",
+          wallContainer.scrollTo({
+            left: scaledX - wallContainer.clientWidth / 2 + 87,
+            top: scaledY - wallContainer.clientHeight / 2 + 110,
+            behavior: "smooth",
+          });
         });
-      });
+      }
+
+      // highlight
+      const rot = (noteId.charCodeAt(1) % 7) - 3;
+      el.style.transition = "transform 0.35s ease, box-shadow 0.35s ease";
+      el.style.boxShadow = "0 0 0 5px rgba(255,255,255,0.7), 0 0 30px rgba(255,255,255,0.3)";
+      el.style.transform = `rotate(${rot}deg) scale(1.15)`;
+
+      setTimeout(() => {
+        el.style.boxShadow = "";
+        el.style.transform = `rotate(${rot}deg) scale(1)`;
+      }, 1200);
+    };
+
+    // Wait for loading to finish first, THEN start trying
+    if (!loading) {
+      const timeout = setTimeout(tryScroll, 300);
+      return () => { cancelled = true; clearTimeout(timeout); };
     }
-
-    // highlight effect
-    el.style.transition = "transform 0.25s ease, box-shadow 0.25s ease";
-    el.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.55)";
-
-    const rot = (noteId.charCodeAt(1) % 7) - 3;
-    el.style.transform = `rotate(${rot}deg) scale(1.12)`;
-
-    setTimeout(() => {
-      el.style.boxShadow = "";
-      el.style.transform = `rotate(${rot}deg) scale(1)`;
-    }, 800);
-  };
-
-  const timeout = setTimeout(tryScroll, 600);
-
-  return () => {
-    cancelled = true;
-    clearTimeout(timeout);
-  };
-}, [loading, notes, zoom]);
-
+  }, [loading, notes, zoom]);   // notes in deps ensures it retries after notes populate
   // Persist liked state across page refreshes
   useEffect(() => {
     try {
@@ -357,7 +354,7 @@ useEffect(() => {
 
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
             {mobileTab === "wall" ? (
-              <div ref={wallRef} style={{ height: "100%", overflow: "auto" }}>
+              <div ref={scrollRef} style={{ height: "100%", overflow: "auto" }}>
                 <WallCanvas
                   wallRef={wallRef}
                   wallStyle={wallStyle}
@@ -444,7 +441,7 @@ useEffect(() => {
           </div>
 
           {desktopTab === "wall" ? (
-            <div ref={wallRef} style={{ flex: 1, overflow: "auto" }}>
+            <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
               <WallCanvas
                 wallRef={wallRef}
                 wallStyle={wallStyle}
