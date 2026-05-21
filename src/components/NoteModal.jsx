@@ -48,7 +48,9 @@ export default function NoteModal({ modal, onClose, variant, tablet, onAddCommen
         boxShadow: "0 -6px 48px rgba(0,0,0,0.45)",
         position: "relative",
         maxHeight: "88vh",
-        overflowY: "auto"
+        overflowY: "auto",
+        scrollbarWidth: "thin",
+        scrollbarColor: `${mc.lines} transparent`
       }}>
         <div style={{ position: "absolute", top: 9, left: "50%", transform: "translateX(-50%)", width: 36, height: 4, background: "rgba(0,0,0,0.15)", borderRadius: 99 }} />
         <button onClick={onClose} style={{ position: "absolute", top: 13, right: 13, background: "rgba(0,0,0,0.1)", border: "none", borderRadius: "50%", width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -56,7 +58,7 @@ export default function NoteModal({ modal, onClose, variant, tablet, onAddCommen
         </button>
 
         {/* Note text */}
-        <div style={{ backgroundImage: `repeating-linear-gradient(transparent,transparent 27px,${mc.lines} 27px,${mc.lines} 28px)`, backgroundPosition: "0 8px", minHeight: 80, paddingTop: 9, marginBottom: 12 }}>
+        <div style={{ backgroundImage: `repeating-linear-gradient(transparent,transparent 27px,${mc.lines} 27px,${mc.lines} 28px)`, backgroundPosition: "0 8px", minHeight: 80, maxHeight: "35vh", overflowY: "auto", paddingTop: 9, marginBottom: 12, scrollbarWidth: "thin", scrollbarColor: `${mc.lines} transparent` }}>
           <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.85, color: mc.text, fontFamily: "Georgia,serif", whiteSpace: "pre-wrap" }}>{modal.text}</p>
         </div>
 
@@ -85,7 +87,7 @@ export default function NoteModal({ modal, onClose, variant, tablet, onAddCommen
               {heartCount > 0 ? heartCount : ""}
             </span>
           </button>
-          <ShareButton noteId={modal.id} noteText={modal.text} />
+          <ShareButton noteId={modal.id} noteText={modal.text} shares={modal.shares ?? 0} />
         </div>
 
         {/* Spotify embed */}
