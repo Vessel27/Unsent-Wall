@@ -76,6 +76,14 @@ export async function incrementNoteHeart(id, delta) {
   }
 }
 
+export async function incrementNoteShares(id) {
+  try {
+    await updateDoc(doc(db, "wallNotes", id), { shares: increment(1) });
+  } catch (e) {
+    console.error("incrementNoteShares:", e);
+  }
+}
+
 export async function loadBg() {
   try {
     const snap = await getDoc(doc(db, "wall", "bg"));

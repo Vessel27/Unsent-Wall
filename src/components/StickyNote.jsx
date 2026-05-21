@@ -171,7 +171,6 @@ export default function StickyNote({ note, meta, onDragEnd, onTap, onReactNote, 
       ref={elRef}
       className="sticky-note"
       onPointerDown={onPointerDown}
-      onTouchStart={onPointerDown}
       style={{
         position: "absolute",
         left: note.x,
@@ -203,6 +202,7 @@ export default function StickyNote({ note, meta, onDragEnd, onTap, onReactNote, 
         <ShareButton noteId={note.id} noteText={note.text} />
         <button
           type="button"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onReactNote?.(note.id); }}
           style={{
             display: "flex",

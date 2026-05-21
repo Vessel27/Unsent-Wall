@@ -50,6 +50,8 @@ export default function UnsentWall() {
   const wallRef = useRef(null);
   const scrollRef = useRef(null);
   const textRef = useRef(null);
+  const userReactionsRef = useRef(userReactions);
+  useEffect(() => { userReactionsRef.current = userReactions; }, [userReactions]);
 
   // Share Function — retry loop so the note element is guaranteed to exist
   // In UnsentWall.jsx — replace the share/scroll useEffect
@@ -196,39 +198,35 @@ export default function UnsentWall() {
     }
   }, [modal, notes]);
 
-  const handleReactNote = useCallback(async (noteId) => {
+  const handleReactNote = useCallback((noteId) => {
     const emoji = "❤️";
+    const isLiked = userReactionsRef.current[noteId] === emoji;
+    const delta = isLiked ? -1 : 1;
 
-    setUserReactions(prevUserReactions => {
-      const isLiked = prevUserReactions[noteId] === emoji;
-      const delta = isLiked ? -1 : 1;
-
-      setNotes(prevNotes => prevNotes.map(n => {
-        if (n.id !== noteId) return n;
-        const current = n.reactions?.["❤️"] ?? 0;
-        const next = Math.max(0, current + delta);
-        return { ...n, reactions: { ...n.reactions, "❤️": next } };
-      }));
-
-      setModal(prev => {
-        if (!prev || prev.id !== noteId) return prev;
-        const current = prev.reactions?.["❤️"] ?? 0;
-        const next = Math.max(0, current + delta);
-        return { ...prev, reactions: { ...prev.reactions, "❤️": next } };
-      });
-
-      if (!noteId.startsWith("temp-")) {
-        incrementNoteHeart(noteId, delta);
-      }
-
+    setUserReactions(prev => {
       if (isLiked) {
-        const next = { ...prevUserReactions };
+        const next = { ...prev };
         delete next[noteId];
         return next;
-      } else {
-        return { ...prevUserReactions, [noteId]: emoji };
       }
+      return { ...prev, [noteId]: emoji };
     });
+
+    setNotes(prevNotes => prevNotes.map(n => {
+      if (n.id !== noteId) return n;
+      const current = n.reactions?.["❤️"] ?? 0;
+      return { ...n, reactions: { ...n.reactions, "❤️": Math.max(0, current + delta) } };
+    }));
+
+    setModal(prev => {
+      if (!prev || prev.id !== noteId) return prev;
+      const current = prev.reactions?.["❤️"] ?? 0;
+      return { ...prev, reactions: { ...prev.reactions, "❤️": Math.max(0, current + delta) } };
+    });
+
+    if (!noteId.startsWith("temp-")) {
+      incrementNoteHeart(noteId, delta);
+    }
   }, []);
 
   const handleReactComment = useCallback(async (noteId, commentId, emoji) => {
@@ -285,7 +283,8 @@ export default function UnsentWall() {
       y: 20 + Math.random() * (WALL_H - 320),
       zIndex: gZ,
       createdAt: Date.now(),
-      comments: []
+      comments: [],
+      reactions: { "❤️": 0 }
     };
 
     const tempId = `temp-${Date.now()}`;
@@ -371,7 +370,13 @@ export default function UnsentWall() {
                 />
               </div>
             ) : (
-              <NoteList notes={notes} loading={loading} onNoteClick={setModal} />
+              <NoteList
+                notes={notes}
+                loading={loading}
+                onNoteClick={setModal}
+                onReactNote={handleReactNote}
+                userReactions={userReactions}
+              />
             )}
           </div>
 
@@ -458,7 +463,13 @@ export default function UnsentWall() {
               />
             </div>
           ) : (
-            <NoteList notes={notes} loading={loading} onNoteClick={setModal} />
+            <NoteList
+              notes={notes}
+              loading={loading}
+              onNoteClick={setModal}
+              onReactNote={handleReactNote}
+              userReactions={userReactions}
+            />
           )}
         </div>
 
